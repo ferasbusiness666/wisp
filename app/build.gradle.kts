@@ -26,9 +26,11 @@ android {
     }
 
     // Populated from env by the release workflow. When the keystore is absent
-    // (local dev) the release build falls back to the debug signing config so
-    // `assembleRelease` still works.
-    val keystoreFile = System.getenv("KEYSTORE_FILE")
+    // (local dev, or a branch build with no secrets) the release build falls
+    // back to the debug signing config so `assembleRelease` still works.
+    // CI passes an empty string rather than unsetting the variable, so blank
+    // has to count as absent too.
+    val keystoreFile = System.getenv("KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
     signingConfigs {
         if (keystoreFile != null) {
             create("release") {
