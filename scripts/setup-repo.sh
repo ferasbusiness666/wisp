@@ -55,9 +55,14 @@ else
   mkdir -p "$KEYSTORE_DIR"
   chmod 700 "$KEYSTORE_DIR"
 
-  random_password() { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 40; }
-  STORE_PASS="$(random_password)"
-  KEY_PASS="$(random_password)"
+  # One shot, fixed length. Filtering /dev/urandom through `head -c` would
+  # SIGPIPE the upstream process and, under `set -o pipefail`, kill the script.
+  #
+  # One password for both store and key: keytool writes a PKCS12 keystore,
+  # which cannot hold a separate key password. It ignores a differing -keypass
+  # and the build later fails at packaging with "Get Key failed".
+  STORE_PASS="$(openssl rand -hex 24)"
+  KEY_PASS="$STORE_PASS"
   GENERATED=true
 
   keytool -genkeypair -v \
@@ -112,7 +117,7 @@ EOF
 if [ "$GENERATED" = true ]; then
   cat <<EOF
 Store password: $STORE_PASS
-Key password:   $KEY_PASS
+Key password:   $KEY_PASS   (the same value — PKCS12 uses one password for both)
 
 SAVE BOTH PASSWORDS AND A COPY OF THE KEYSTORE FILE SOMEWHERE SAFE, NOW.
 This is the only time they are printed. Every build has to be signed with this

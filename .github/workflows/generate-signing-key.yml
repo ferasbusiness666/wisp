@@ -1,0 +1,124 @@
+name: Generate signing key
+
+# Run this ONCE, from the Actions tab, before the first real release.
+#
+# It creates the release keystore that every future build must be signed with,
+# and packages it — plus its two generated passwords — into a downloadable
+# artifact. You then paste those values into the repository's Actions secrets.
+#
+# Running it a SECOND time makes a DIFFERENT key. Builds signed with a new key
+# will not install over an already-installed Wisp; both phones would have to
+# uninstall first, losing their device code and contacts. Only run it again if
+# you have genuinely lost the keystore and are willing to start over.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Generate keystore
+        run: |
+          set -euo pipefail
+          mkdir -p out
+
+          # openssl gives a fixed-length string in one shot. Filtering
+          # /dev/urandom through `head -c` instead would SIGPIPE the upstream
+          # process and, under `set -o pipefail`, abort the whole job.
+          #
+          # One password, used for both the store and the key: keytool writes a
+          # PKCS12 keystore, which cannot hold a key password different from the
+          # store password. It silently ignores a differing -keypass, and the
+          # build then fails at packaging with "Get Key failed".
+          PASS="$(openssl rand -hex 24)"
+          # Mask before the value can reach the log in any form.
+          echo "::add-mask::$PASS"
+
+          keytool -genkeypair \
+            -keystore out/release.keystore \
+            -alias wisp \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "$PASS" -keypass "$PASS" \
+            -dname "CN=Wisp, OU=Wisp, O=Wisp, L=, ST=, C=" >/dev/null 2>&1
+
+          base64 -w0 out/release.keystore > out/KEYSTORE_BASE64.txt
+          printf '%s' "$PASS"  > out/KEYSTORE_PASSWORD.txt
+          printf '%s' "$PASS"  > out/KEY_PASSWORD.txt
+          printf 'wisp'        > out/KEY_ALIAS.txt
+
+          cat > out/READ-ME-FIRST.txt <<'TXT'
+          Wisp release signing key
+          ========================
+
+          1. Keep release.keystore somewhere safe and permanent — a password
+             manager, a backup drive, anywhere you will still have it in a year.
+             Keep KEYSTORE_PASSWORD.txt and KEY_PASSWORD.txt with it.
+
+          2. In the repository on github.com, go to:
+                Settings -> Secrets and variables -> Actions -> New repository secret
+
+             Create four secrets. The name must match exactly. For each value,
+             open the matching .txt file, select all, copy, and paste:
+
+                Name                 Value comes from
+                -------------------  -------------------------
+                KEYSTORE_BASE64      KEYSTORE_BASE64.txt
+                KEYSTORE_PASSWORD    KEYSTORE_PASSWORD.txt
+                KEY_ALIAS            KEY_ALIAS.txt   (it is just: wisp)
+                KEY_PASSWORD         KEY_PASSWORD.txt
+
+             KEYSTORE_BASE64.txt is one very long single line. That is correct.
+             Make sure you copy the whole thing and add no spaces or newlines.
+
+             KEYSTORE_PASSWORD.txt and KEY_PASSWORD.txt hold the SAME password.
+             That is also correct — this keystore format uses one password for
+             both. Create both secrets anyway, with that same value in each.
+
+          3. Delete this workflow run's artifact afterwards (Actions -> the run ->
+             the artifact's trash icon). The secrets are stored in GitHub now, and
+             you have your own backup from step 1.
+
+          Why this matters
+          ----------------
+          Android only installs an update if it is signed with the exact same key
+          as the version already on the phone. As long as these four secrets stay
+          put, every future build installs over the last one and keeps your device
+          code and contact list. If the key is lost, both phones have to uninstall
+          and start fresh.
+          TXT
+
+      - name: Package it up
+        uses: actions/upload-artifact@v4
+        with:
+          name: wisp-signing-key
+          path: out/
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Instructions
+        run: |
+          {
+            echo "## Signing key created"
+            echo
+            echo "1. Download the **wisp-signing-key** artifact at the bottom of this page."
+            echo "2. Unzip it and read \`READ-ME-FIRST.txt\`."
+            echo "3. Back up \`release.keystore\` and both password files somewhere permanent."
+            echo "4. Add four repository secrets under **Settings → Secrets and variables → Actions**:"
+            echo "   \`KEYSTORE_BASE64\`, \`KEYSTORE_PASSWORD\`, \`KEY_ALIAS\`, \`KEY_PASSWORD\`."
+            echo "5. Delete the artifact once the secrets are saved."
+            echo
+            echo "> The artifact expires on its own after 1 day. Do not run this workflow again —"
+            echo "> a second run makes a different key, and builds signed with it will not install"
+            echo "> over an existing Wisp."
+          } >> "$GITHUB_STEP_SUMMARY"

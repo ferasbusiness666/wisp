@@ -29,15 +29,29 @@ Android app  ──wss──►  Worker  ──►  Signaling Durable Object (ro
 
 ### 1. GitHub
 
+Two ways, pick one.
+
+**From a terminal:**
+
 ```bash
 ./scripts/setup-repo.sh
 ```
 
 Generates the release keystore (outside the git tree), uploads the four signing
 secrets, gives Actions write permission so it can publish releases, and turns
-off Wiki/Projects/Discussions. It prints both keystore passwords once — save
-them. Every build has to be signed with that same key or Android won't treat a
-new APK as an update to the installed one.
+off Wiki/Projects/Discussions.
+
+**From the browser only:** run the **Generate signing key** workflow once from
+the Actions tab. It produces a downloadable artifact holding the keystore, its
+password and a `READ-ME-FIRST.txt`; you then paste four values into
+*Settings → Secrets and variables → Actions*. Set workflow permissions to
+read/write under *Settings → Actions → General* so releases can be published.
+
+Either way: back up the keystore file and its password. Every build has to be
+signed with that same key or Android won't treat a new APK as an update to the
+installed one. Until those secrets exist, release builds fall back to a debug
+key and the workflow deliberately publishes **no** Release — installing a
+debug-signed APK would block every later signed update.
 
 ### 2. Cloudflare
 
@@ -55,6 +69,12 @@ Then, so CI can redeploy on every push to `main`:
 ```bash
 gh secret set CLOUDFLARE_API_TOKEN
 ```
+
+Browser-only equivalent: add `CLOUDFLARE_API_TOKEN` (and `CLOUDFLARE_ACCOUNT_ID`
+if your token can see more than one account) under *Settings → Secrets and
+variables → Actions*, then run the **Worker** workflow from the Actions tab.
+The two TURN secrets can be added in the Cloudflare dashboard instead, under
+*Workers & Pages → wisp-signaling → Settings → Variables and secrets*.
 
 The TURN key ID and token stay as Worker secrets. They are never sent to the
 app — the app asks the Worker for credentials at the start of each call.
