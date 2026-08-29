@@ -32,3 +32,11 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Node (Cloudflare Worker)
+node_modules/
+.wrangler/
+
+# Release signing material must never enter the tree
+release.keystore
+*.base64

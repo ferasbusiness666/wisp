@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Wisp</string>
+
+    <!-- Home -->
+    <string name="my_code_label">Your code</string>
+    <string name="copy">Copy</string>
+    <string name="code_copied">Code copied</string>
+    <string name="add_contact_label">Add a contact</string>
+    <string name="add_hint_code">Their code</string>
+    <string name="add_hint_name">Name them</string>
+    <string name="add">Add</string>
+    <string name="empty_hint">No contacts yet. Ask someone for their code, add it above, and have them add yours.</string>
+    <string name="online">Online</string>
+    <string name="offline">Offline</string>
+    <string name="invalid_code">That doesn\'t look like a Wisp code</string>
+    <string name="cant_add_self">That\'s your own code</string>
+    <string name="already_added">Already in your contacts</string>
+    <string name="contact_added">Added %1$s</string>
+    <string name="remove_title">Remove %1$s?</string>
+    <string name="remove_message">They stay on their side — this only clears them from your list.</string>
+    <string name="remove">Remove</string>
+    <string name="already_in_call">Already in a call</string>
+    <string name="need_camera_mic">Wisp needs the camera and microphone to place a call</string>
+
+    <!-- Call -->
+    <string name="answer">Answer</string>
+    <string name="decline">Decline</string>
+    <string name="hang_up">Hang up</string>
+    <string name="mute">Mute</string>
+    <string name="unmute">Unmute</string>
+    <string name="camera">Camera</string>
+    <string name="switch_camera">Switch camera</string>
+    <string name="volume_percent">Volume %1$d%%</string>
+    <string name="waiting_for_video">Waiting for video…</string>
+
+    <string name="status_connected">Connected</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_calling">Calling…</string>
+    <string name="status_incoming">Incoming call</string>
+    <string name="status_in_call">In call</string>
+    <string name="status_reconnecting">Reconnecting…</string>
+    <string name="status_call_ended">Call ended</string>
+    <string name="status_declined">Declined</string>
+    <string name="status_no_answer">No answer</string>
+    <string name="status_offline">They\'re offline</string>
+    <string name="status_failed">Couldn\'t start the call</string>
+    <string name="status_no_connection">No connection to the signaling server</string>
+    <string name="status_connection_lost">Connection lost</string>
+
+    <!-- Notifications -->
+    <string name="channel_service">Wisp background</string>
+    <string name="channel_service_desc">Keeps Wisp reachable so calls can ring this phone</string>
+    <string name="channel_incoming">Incoming calls</string>
+    <string name="channel_incoming_desc">Rings when someone calls you</string>
+    <string name="channel_ongoing">Ongoing call</string>
+    <string name="channel_ongoing_desc">Shown while a call is in progress</string>
+    <string name="notif_idle_title">Wisp is ready</string>
+    <string name="notif_idle_text">Waiting for calls</string>
+    <string name="notif_incoming_text">Incoming video call</string>
+
+    <!-- Setup -->
+    <string name="allow">Allow</string>
+    <string name="not_now">Not now</string>
+    <string name="open_settings">Open settings</string>
+    <string name="battery_title">Keep Wisp awake</string>
+    <string name="battery_message">Android puts apps to sleep to save power. Without an exemption, Wisp can miss calls when your screen has been off for a while.</string>
+    <string name="fsi_title">Full-screen calls</string>
+    <string name="fsi_message">Android 14 needs a separate permission before an incoming call can take over the screen. Without it, calls arrive as a banner at the top instead.</string>
+    <string name="oem_title">One more setting</string>
+    <string name="oem_samsung">Samsung phones put unused apps to sleep, which closes Wisp\'s connection. In Device care → Battery → Background usage limits, make sure Wisp is not in \"Sleeping apps\" or \"Deep sleeping apps\".</string>
+    <string name="oem_huawei">Huawei phones close background apps aggressively. In Phone Manager → App launch, switch Wisp to manual and enable auto-launch, secondary launch and run in background.</string>
+    <string name="oem_xiaomi">MIUI blocks background apps by default. In Security → Permissions → Autostart, turn Wisp on, and set its battery saver to \"No restrictions\".</string>
+</resources>

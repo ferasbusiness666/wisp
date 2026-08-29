@@ -1,0 +1,23 @@
+name = "wisp-signaling"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# One Durable Object instance holds the whole routing table. It is addressed by
+# a fixed name so every device lands on the same object.
+[[durable_objects.bindings]]
+name = "SIGNALING"
+class_name = "Signaling"
+
+# SQLite-backed Durable Objects are what the free plan allows.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Signaling"]
+
+[vars]
+# How long minted TURN credentials stay valid. A day comfortably outlasts any
+# call, so there is never a mid-call credential refresh.
+TURN_TTL_SECONDS = "86400"
+
+# TURN_KEY_ID and TURN_KEY_API_TOKEN are secrets, not vars:
+#   wrangler secret put TURN_KEY_ID
+#   wrangler secret put TURN_KEY_API_TOKEN
