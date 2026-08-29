@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Wisp" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="android:statusBarColor">@color/wisp_bg</item>
+        <item name="android:navigationBarColor">@color/wisp_bg</item>
+        <item name="android:windowBackground">@color/wisp_bg</item>
+        <item name="colorPrimary">@color/wisp_accent</item>
+        <item name="colorOnPrimary">@color/wisp_bg</item>
+        <item name="colorSurface">@color/wisp_surface</item>
+        <item name="colorOnSurface">@color/wisp_text</item>
+    </style>
+
+    <style name="Theme.Wisp.Call" parent="Theme.Wisp">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>
