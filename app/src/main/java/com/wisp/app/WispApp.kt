@@ -5,6 +5,9 @@ import android.app.Application
 class WispApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        // Installed first, so a crash anywhere after this point is recoverable
+        // as a readable report rather than just a vanished app.
+        CrashLog.install(this)
         // Make sure the device has an identity before any screen or service
         // asks for it, so the code is stable from the very first launch.
         DeviceIdentity.myCode(this)

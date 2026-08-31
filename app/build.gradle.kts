@@ -86,6 +86,8 @@ android {
 
     buildFeatures {
         viewBinding = true
+        // Needed so a crash report can name the exact build it came from.
+        buildConfig = true
     }
 
     lint {

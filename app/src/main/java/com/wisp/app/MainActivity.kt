@@ -66,6 +66,27 @@ class MainActivity : AppCompatActivity() {
         }
 
         observeState()
+        showCrashReportIfAny()
+    }
+
+    /**
+     * There is no crash reporting service behind a sideloaded app, so the last
+     * fatal error is surfaced here as copyable text. Without this a crash is
+     * just an app that vanished, with nothing to act on.
+     */
+    private fun showCrashReportIfAny() {
+        val report = CrashLog.lastCrash(this) ?: return
+        AlertDialog.Builder(this)
+            .setTitle(R.string.crash_title)
+            .setMessage(getString(R.string.crash_message, report))
+            .setPositiveButton(R.string.crash_copy) { _, _ ->
+                val clipboard = getSystemService(ClipboardManager::class.java)
+                clipboard?.setPrimaryClip(ClipData.newPlainText("Wisp crash", report))
+                Toast.makeText(this, R.string.crash_copied, Toast.LENGTH_SHORT).show()
+                CrashLog.clear(this)
+            }
+            .setNegativeButton(R.string.crash_dismiss) { _, _ -> CrashLog.clear(this) }
+            .show()
     }
 
     override fun onResume() {
