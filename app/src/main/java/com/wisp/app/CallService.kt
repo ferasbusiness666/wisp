@@ -56,6 +56,8 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
         const val ACTION_HANGUP = "com.wisp.app.HANGUP"
         const val ACTION_REFRESH_CONTACTS = "com.wisp.app.REFRESH_CONTACTS"
         const val ACTION_RENAME = "com.wisp.app.RENAME"
+        const val ACTION_REFRESH_DIRECTORY = "com.wisp.app.REFRESH_DIRECTORY"
+        const val ACTION_ADD_ME = "com.wisp.app.ADD_ME"
 
         const val EXTRA_CODE = "code"
         const val EXTRA_NAME = "name"
@@ -96,6 +98,19 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
 
         /** Republishes our display name after the user edits it. */
         fun republishName(context: Context) = command(context, ACTION_RENAME)
+
+        /** Re-reads who is online, e.g. when the home screen comes back. */
+        fun refreshDirectory(context: Context) = command(context, ACTION_REFRESH_DIRECTORY)
+
+        /** Tells someone we just saved to save us back. */
+        fun askToBeAdded(context: Context, code: String) {
+            start(
+                context,
+                Intent(context, CallService::class.java)
+                    .setAction(ACTION_ADD_ME)
+                    .putExtra(EXTRA_CODE, code)
+            )
+        }
 
         private fun command(context: Context, action: String) {
             start(context, Intent(context, CallService::class.java).setAction(action))
@@ -174,6 +189,10 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
             ACTION_HANGUP -> endCall(getString(R.string.status_call_ended), notifyPeer = true)
             ACTION_REFRESH_CONTACTS -> signaling.watch(ContactStore.codes(this))
             ACTION_RENAME -> signaling.identify(DeviceIdentity.myName(this))
+            ACTION_REFRESH_DIRECTORY -> {
+                if (signaling.isOpen) signaling.requestDirectory() else signaling.reconnectNow()
+            }
+            ACTION_ADD_ME -> intent.getStringExtra(EXTRA_CODE)?.let { signaling.sendAddMe(it) }
             else -> {
                 // Plain start (launcher or boot): just make sure we are connected.
                 if (!signaling.isOpen) signaling.reconnectNow()
@@ -230,6 +249,7 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
     private fun beginOutgoingNegotiation() {
         val target = peerCode ?: return
         scope.launch {
+            CrashLog.step(this@CallService, "outgoing: fetching ice servers")
             val iceServers = IceServers.fetch(myCode)
             if (phase != CallPhase.OUTGOING || peerCode != target) return@launch
             val call = newEngine(iceServers) ?: return@launch
@@ -256,6 +276,7 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
         acquireCallResources()
 
         scope.launch {
+            CrashLog.step(this@CallService, "answering: fetching ice servers")
             val iceServers = IceServers.fetch(myCode)
             if (phase != CallPhase.CONNECTING || peerCode != from) return@launch
             val call = newEngine(iceServers) ?: return@launch
@@ -267,11 +288,15 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
     }
 
     private fun newEngine(iceServers: List<PeerConnection.IceServer>): CallEngine? {
+        CrashLog.step(this, "creating video engine")
         val call = try {
             (engine ?: CallEngine(this, this).also {
                 engine = it
                 CallStateHolder.engine = it
-            }).apply { startLocalMedia() }
+            }).apply {
+                CrashLog.step(this@CallService, "opening camera and microphone")
+                startLocalMedia()
+            }
         } catch (error: Throwable) {
             // Creating the WebRTC factory, opening the camera or opening the
             // microphone can all fail per-device. None of them should crash.
@@ -280,6 +305,7 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
             return null
         }
 
+        CrashLog.step(this, "creating peer connection")
         val ready = try {
             call.createPeerConnection(iceServers)
         } catch (error: Throwable) {
@@ -292,6 +318,7 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
         }
         call.setRemoteVolume(CallStateHolder.call.value.volumePercent / 100.0)
         publish { it.copy(micMuted = call.micMuted, cameraOn = call.cameraEnabled) }
+        CrashLog.stepDone(this)
         return call
     }
 
@@ -318,6 +345,17 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
 
     override fun onPresence(states: Map<String, Boolean>) {
         CallStateHolder.mergePresence(states)
+    }
+
+    override fun onAddMe(code: String, name: String) {
+        if (code == myCode) return
+        // They saved us, so save them: a contact list that only works one way
+        // is a trap, since the other side looks reachable and isn't.
+        if (ContactStore.add(this, Contact(code, name))) {
+            Log.i(TAG, "added $code back after they added us")
+            signaling.watch(ContactStore.codes(this))
+            CallStateHolder.bumpContacts()
+        }
     }
 
     override fun onDirectory(people: List<Contact>) {
@@ -634,6 +672,7 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
 
         stopRinging()
         Notifications.cancelIncoming(this)
+        CrashLog.stepDone(this)
 
         engine?.close()
         engine = null

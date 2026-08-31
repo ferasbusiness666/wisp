@@ -108,8 +108,7 @@
         android:layout_marginTop="12dp"
         android:background="@drawable/bg_card"
         android:orientation="vertical"
-        android:padding="16dp"
-        android:visibility="gone">
+        android:padding="16dp">
 
         <TextView
             android:layout_width="wrap_content"
@@ -126,6 +125,16 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:nestedScrollingEnabled="false" />
+
+        <TextView
+            android:id="@+id/discoveredEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/nobody_online"
+            android:textColor="@color/wisp_text_dim"
+            android:textSize="13sp"
+            android:visibility="gone" />
     </LinearLayout>
 
     <LinearLayout

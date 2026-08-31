@@ -151,7 +151,8 @@ type Inbound =
   | { type: 'offer' | 'answer'; to?: unknown; sdp?: unknown }
   | { type: 'ice'; to?: unknown; mid?: unknown; index?: unknown; candidate?: unknown }
   | { type: 'bye'; to?: unknown; reason?: unknown }
-  | { type: 'ice-restart'; to?: unknown };
+  | { type: 'ice-restart'; to?: unknown }
+  | { type: 'add-me'; to?: unknown };
 
 /**
  * Routing table for every connected device.
@@ -286,6 +287,20 @@ export class Signaling implements DurableObject {
         const to = this.target(message.to);
         if (!to) return;
         this.forward(ws, self, to, { type: 'ice-restart', from: self.code });
+        return;
+      }
+
+      case 'add-me': {
+        // Saving someone should be mutual: one side adding the other is enough.
+        // The name comes from our own attachment, so a device cannot claim
+        // someone else's identity here.
+        const to = this.target(message.to);
+        if (!to) return;
+        this.forward(ws, self, to, {
+          type: 'add-me',
+          from: self.code,
+          name: self.name,
+        });
         return;
       }
 

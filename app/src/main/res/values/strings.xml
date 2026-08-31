@@ -10,6 +10,7 @@
     <string name="my_name_hint">What others see</string>
     <string name="online_now">Online now — tap to add</string>
     <string name="tap_to_add">Add</string>
+    <string name="nobody_online">Nobody else is online right now. Open Wisp on the other phone and it will appear here.</string>
     <string name="add_by_code_label">Or add by code</string>
     <string name="add_hint_code">Their code</string>
     <string name="add_hint_name">Name them</string>
@@ -66,6 +67,7 @@
     <!-- Crash report -->
     <string name="crash_title">Wisp crashed last time</string>
     <string name="crash_message">Copy this and send it over so it can be fixed.\n\n%1$s</string>
+    <string name="crash_step_message">Wisp stopped while it was doing this:\n\n%1$s\n\nSend that line over so it can be fixed.</string>
     <string name="crash_copy">Copy</string>
     <string name="crash_dismiss">Dismiss</string>
     <string name="crash_copied">Copied — paste it in the chat</string>
