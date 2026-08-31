@@ -1,6 +1,8 @@
 package com.wisp.app
 
 import android.annotation.SuppressLint
+import android.app.ActivityManager
+import android.app.ApplicationExitInfo
 import android.content.Context
 import android.os.Build
 import java.io.PrintWriter
@@ -85,6 +87,41 @@ object CrashLog {
 
     fun clearStep(context: Context) {
         Prefs.of(context).edit().putBoolean(KEY_IN_PROGRESS, false).apply()
+    }
+
+    /**
+     * Why the process died last time, straight from the system.
+     *
+     * A crash inside a native library produces no Java stack trace, so this is
+     * the only way to tell a real native crash apart from the system killing
+     * the app for memory or an ANR. Android keeps this record from API 30; on
+     * older releases there is nothing to read.
+     */
+    fun lastExitReason(context: Context): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val manager = context.getSystemService(ActivityManager::class.java) ?: return null
+        val exits = runCatching {
+            manager.getHistoricalProcessExitReasons(context.packageName, 0, 5)
+        }.getOrNull().orEmpty()
+        val exit = exits.firstOrNull() ?: return null
+
+        val reason = when (exit.reason) {
+            ApplicationExitInfo.REASON_CRASH_NATIVE -> "native crash"
+            ApplicationExitInfo.REASON_CRASH -> "app crash"
+            ApplicationExitInfo.REASON_ANR -> "not responding"
+            ApplicationExitInfo.REASON_LOW_MEMORY -> "out of memory"
+            ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "using too many resources"
+            ApplicationExitInfo.REASON_PERMISSION_CHANGE -> "permission changed"
+            ApplicationExitInfo.REASON_USER_REQUESTED -> "closed by the user"
+            ApplicationExitInfo.REASON_SIGNALED -> "killed by signal"
+            ApplicationExitInfo.REASON_OTHER -> "other"
+            else -> "reason code ${exit.reason}"
+        }
+        return buildString {
+            append("last exit: ").append(reason)
+            append(" (status ").append(exit.status).append(")")
+            exit.description?.takeIf { it.isNotBlank() }?.let { append("\n").append(it) }
+        }
     }
 
     fun lastCrash(context: Context): String? =

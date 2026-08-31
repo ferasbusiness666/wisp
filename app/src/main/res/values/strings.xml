@@ -67,7 +67,7 @@
     <!-- Crash report -->
     <string name="crash_title">Wisp crashed last time</string>
     <string name="crash_message">Copy this and send it over so it can be fixed.\n\n%1$s</string>
-    <string name="crash_step_message">Wisp stopped while it was doing this:\n\n%1$s\n\nSend that line over so it can be fixed.</string>
+    <string name="crash_step_message">Wisp stopped unexpectedly:\n\n%1$s\n\nCopy this and send it over so it can be fixed.</string>
     <string name="crash_copy">Copy</string>
     <string name="crash_dismiss">Dismiss</string>
     <string name="crash_copied">Copied — paste it in the chat</string>
