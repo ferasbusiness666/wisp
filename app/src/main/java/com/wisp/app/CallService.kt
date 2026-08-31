@@ -27,6 +27,7 @@ import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -103,7 +104,20 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * Setting up a call touches the camera, the microphone, the codec factory
+     * and the network, any of which can fail on a given device. Without this,
+     * such a failure leaves the coroutine and takes the whole app down; with it
+     * the call ends with a message the caller can actually read.
+     */
+    private val crashGuard = CoroutineExceptionHandler { _, error ->
+        Log.e(TAG, "call setup failed", error)
+        handler.post { endCall(getString(R.string.status_failed), notifyPeer = true) }
+    }
+
+    private val scope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + crashGuard)
 
     private lateinit var myCode: String
     private lateinit var signaling: SignalingClient
@@ -247,12 +261,26 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
     }
 
     private fun newEngine(iceServers: List<PeerConnection.IceServer>): CallEngine? {
-        val call = engine ?: CallEngine(this, this).also {
-            engine = it
-            CallStateHolder.engine = it
+        val call = try {
+            (engine ?: CallEngine(this, this).also {
+                engine = it
+                CallStateHolder.engine = it
+            }).apply { startLocalMedia() }
+        } catch (error: Throwable) {
+            // Creating the WebRTC factory, opening the camera or opening the
+            // microphone can all fail per-device. None of them should crash.
+            Log.e(TAG, "could not start local media", error)
+            endCall(getString(R.string.status_no_media), notifyPeer = true)
+            return null
         }
-        call.startLocalMedia()
-        if (!call.createPeerConnection(iceServers)) {
+
+        val ready = try {
+            call.createPeerConnection(iceServers)
+        } catch (error: Throwable) {
+            Log.e(TAG, "could not create peer connection", error)
+            false
+        }
+        if (!ready) {
             endCall(getString(R.string.status_failed), notifyPeer = true)
             return null
         }

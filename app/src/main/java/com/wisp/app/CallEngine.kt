@@ -360,7 +360,16 @@ class CallEngine(
         capturing = false
     }
 
-    private fun createCameraCapturer(): CameraVideoCapturer? {
+    private fun createCameraCapturer(): CameraVideoCapturer? = try {
+        openCamera()
+    } catch (error: Throwable) {
+        // Some devices throw out of the camera service rather than reporting an
+        // empty list. Audio-only is a far better outcome than no call at all.
+        Log.w(TAG, "camera unavailable: ${error.message}")
+        null
+    }
+
+    private fun openCamera(): CameraVideoCapturer? {
         val enumerator = Camera2Enumerator(appContext)
         val names = enumerator.deviceNames
         val front = names.firstOrNull { enumerator.isFrontFacing(it) }

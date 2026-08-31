@@ -45,6 +45,7 @@
     <string name="status_no_answer">No answer</string>
     <string name="status_offline">They\'re offline</string>
     <string name="status_failed">Couldn\'t start the call</string>
+    <string name="status_no_media">Couldn\'t open the camera or microphone</string>
     <string name="status_no_connection">No connection to the signaling server</string>
     <string name="status_connection_lost">Connection lost</string>
 
@@ -55,9 +56,15 @@
     <string name="channel_incoming_desc">Rings when someone calls you</string>
     <string name="channel_ongoing">Ongoing call</string>
     <string name="channel_ongoing_desc">Shown while a call is in progress</string>
-    <string name="notif_idle_title">Wisp is ready</string>
-    <string name="notif_idle_text">Waiting for calls</string>
+    <string name="notif_idle_title">Wisp</string>
     <string name="notif_incoming_text">Incoming video call</string>
+
+    <!-- Crash report -->
+    <string name="crash_title">Wisp crashed last time</string>
+    <string name="crash_message">Copy this and send it over so it can be fixed.\n\n%1$s</string>
+    <string name="crash_copy">Copy</string>
+    <string name="crash_dismiss">Dismiss</string>
+    <string name="crash_copied">Copied — paste it in the chat</string>
 
     <!-- Setup -->
     <string name="allow">Allow</string>
