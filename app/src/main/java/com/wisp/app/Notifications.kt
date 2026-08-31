@@ -75,16 +75,29 @@ object Notifications {
         return manager.canUseFullScreenIntent()
     }
 
+    /**
+     * The idle notification exists only because Android will not let a service
+     * stay alive in the background without one, and that service is what makes
+     * the phone ring. It cannot be removed, so it is pushed as far down as the
+     * platform allows: minimum importance, no timestamp, silent, and deferred
+     * so it does not appear the moment the service starts.
+     *
+     * Someone who still doesn't want to see it can turn off the "Wisp
+     * background" notification category in Android settings — the service keeps
+     * running, and incoming calls are a separate category that stays on.
+     */
     fun idle(context: Context): Notification =
         NotificationCompat.Builder(context, CHANNEL_SERVICE)
             .setSmallIcon(R.drawable.ic_stat_wisp)
             .setContentTitle(context.getString(R.string.notif_idle_title))
-            .setContentText(context.getString(R.string.notif_idle_text))
             .setContentIntent(openApp(context))
             .setOngoing(true)
             .setShowWhen(false)
+            .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_DEFERRED)
             .build()
 
     fun incoming(context: Context, peerName: String, peerCode: String): Notification {

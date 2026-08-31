@@ -56,8 +56,7 @@
     <string name="channel_incoming_desc">Rings when someone calls you</string>
     <string name="channel_ongoing">Ongoing call</string>
     <string name="channel_ongoing_desc">Shown while a call is in progress</string>
-    <string name="notif_idle_title">Wisp is ready</string>
-    <string name="notif_idle_text">Waiting for calls</string>
+    <string name="notif_idle_title">Wisp</string>
     <string name="notif_incoming_text">Incoming video call</string>
 
     <!-- Crash report -->
