@@ -56,23 +56,30 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew --no-daemon assembleRelease
 
-      - name: Name the APK
+      - name: Name the APKs
         id: apk
         run: |
-          SRC=$(find app/build/outputs/apk/release -name '*.apk' | head -n1)
-          if [ -z "$SRC" ]; then
-            echo "No APK produced" >&2
-            exit 1
-          fi
-          DEST="wisp-1.0.${GITHUB_RUN_NUMBER}.apk"
-          cp "$SRC" "$DEST"
-          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          SRC=app/build/outputs/apk/release
+          OUT=release-apks
+          mkdir -p "$OUT"
+          V="1.0.${GITHUB_RUN_NUMBER}"
 
-      - name: Upload APK artifact
+          # Named by what a person can actually check about their phone, not by
+          # the ABI string.
+          cp "$SRC/app-arm64-v8a-release.apk"   "$OUT/wisp-$V-arm64.apk"
+          cp "$SRC/app-armeabi-v7a-release.apk" "$OUT/wisp-$V-arm32.apk"
+          cp "$SRC/app-universal-release.apk"   "$OUT/wisp-$V-universal.apk"
+
+          ls -la "$OUT"
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: wisp-apk
-          path: ${{ steps.apk.outputs.path }}
+          path: ${{ steps.apk.outputs.dir }}
           if-no-files-found: error
 
       - name: Clean up keystore
@@ -92,9 +99,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v1.0.${GITHUB_RUN_NUMBER}"
-          gh release create "$TAG" "${{ steps.apk.outputs.path }}" \
+          DIR="${{ steps.apk.outputs.dir }}"
+          V="${{ steps.apk.outputs.version }}"
+
+          NOTES=$(cat <<EOF
+          **Which file do I download?**
+
+          | File | For |
+          | --- | --- |
+          | \`wisp-$V-arm64.apk\` | **Start here.** Almost every phone from the last several years. |
+          | \`wisp-$V-arm32.apk\` | Older or budget phones. Try this if arm64 won't install. |
+          | \`wisp-$V-universal.apk\` | Works on any phone, but a larger download. |
+
+          They are the same app — only the built-in video engine differs, which
+          is why one chip's build is roughly half the size of the combined one.
+
+          versionCode ${GITHUB_RUN_NUMBER}, built from ${GITHUB_SHA}.
+          EOF
+          )
+
+          gh release create "$TAG" \
+            "$DIR/wisp-$V-arm64.apk" \
+            "$DIR/wisp-$V-arm32.apk" \
+            "$DIR/wisp-$V-universal.apk" \
             --title "Wisp $TAG" \
-            --notes "versionCode ${GITHUB_RUN_NUMBER}, built from ${GITHUB_SHA}." \
+            --notes "$NOTES" \
             --latest
 
       - name: Explain a skipped release
