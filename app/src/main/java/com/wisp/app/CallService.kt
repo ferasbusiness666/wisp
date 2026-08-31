@@ -55,6 +55,7 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
         const val ACTION_DECLINE = "com.wisp.app.DECLINE"
         const val ACTION_HANGUP = "com.wisp.app.HANGUP"
         const val ACTION_REFRESH_CONTACTS = "com.wisp.app.REFRESH_CONTACTS"
+        const val ACTION_RENAME = "com.wisp.app.RENAME"
 
         const val EXTRA_CODE = "code"
         const val EXTRA_NAME = "name"
@@ -92,6 +93,9 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
         fun hangUp(context: Context) = command(context, ACTION_HANGUP)
 
         fun refreshContacts(context: Context) = command(context, ACTION_REFRESH_CONTACTS)
+
+        /** Republishes our display name after the user edits it. */
+        fun republishName(context: Context) = command(context, ACTION_RENAME)
 
         private fun command(context: Context, action: String) {
             start(context, Intent(context, CallService::class.java).setAction(action))
@@ -151,6 +155,7 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
 
         signaling = SignalingClient(myCode, this)
         signaling.watch(ContactStore.codes(this))
+        signaling.identify(DeviceIdentity.myName(this))
         signaling.connect()
 
         registerNetworkCallback()
@@ -168,6 +173,7 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
             ACTION_DECLINE -> endCall(getString(R.string.status_declined), notifyPeer = true)
             ACTION_HANGUP -> endCall(getString(R.string.status_call_ended), notifyPeer = true)
             ACTION_REFRESH_CONTACTS -> signaling.watch(ContactStore.codes(this))
+            ACTION_RENAME -> signaling.identify(DeviceIdentity.myName(this))
             else -> {
                 // Plain start (launcher or boot): just make sure we are connected.
                 if (!signaling.isOpen) signaling.reconnectNow()
@@ -306,10 +312,17 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
     override fun onSignalingClosed() {
         CallStateHolder.setSignalingOnline(false)
         CallStateHolder.setPresence(emptyMap())
+        // Nothing is known to be online while the socket is down.
+        CallStateHolder.setDirectory(emptyList())
     }
 
     override fun onPresence(states: Map<String, Boolean>) {
         CallStateHolder.mergePresence(states)
+    }
+
+    override fun onDirectory(people: List<Contact>) {
+        // Drop ourselves; nobody needs to add their own phone.
+        CallStateHolder.setDirectory(people.filterNot { it.code == myCode })
     }
 
     override fun onOffer(from: String, sdp: String) {
