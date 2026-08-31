@@ -9,7 +9,7 @@ package com.wisp.app
 object Config {
 
     /** Host of the Cloudflare Worker (a workers.dev subdomain or a custom domain). */
-    const val SIGNALING_HOST = "wisp-signaling.example.workers.dev"
+    const val SIGNALING_HOST = "wisp-signaling.feroomon10400.workers.dev"
 
     val signalingUrl: String
         get() = "wss://$SIGNALING_HOST/ws"
