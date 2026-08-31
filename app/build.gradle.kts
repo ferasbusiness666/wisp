@@ -71,6 +71,19 @@ android {
         jvmTarget = "17"
     }
 
+    // One APK per chip type. The WebRTC engine is ~18 MB of native library and
+    // a phone only ever needs its own ABI, so a per-ABI APK is roughly half the
+    // size of the combined one — which matters on an older phone that is short
+    // on space. The universal APK stays available for anyone unsure which to take.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = true
+        }
+    }
+
     buildFeatures {
         viewBinding = true
     }
