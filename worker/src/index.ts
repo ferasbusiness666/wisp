@@ -19,6 +19,32 @@ const CODE_RE = /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/;
 
 const PUBLIC_STUN = ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'];
 
+/**
+ * Free public relay, used when no Cloudflare TURN key is configured.
+ *
+ * Cloudflare Realtime wants a payment method on file even inside its free
+ * tier, so this keeps a relay available at no cost. It is a shared community
+ * service with no uptime guarantee, and it is only ever a fallback: STUN is
+ * tried first, and media stays end-to-end encrypted by WebRTC either way, so
+ * a relay operator can carry the packets but not read them.
+ */
+const PUBLIC_TURN = [
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp',
+    ],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+];
+
+/** What the app gets when Cloudflare TURN is not configured or is failing. */
+function freeIceServers(): unknown[] {
+  return [...PUBLIC_STUN.map((urls) => ({ urls })), ...PUBLIC_TURN];
+}
+
 const DEFAULT_TURN_TTL = 86400;
 
 function json(body: unknown, status = 200): Response {
@@ -75,8 +101,7 @@ async function turnCredentials(request: Request, env: Env): Promise<Response> {
   if (!CODE_RE.test(code)) return new Response('bad code', { status: 400 });
 
   if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN) {
-    // Still usable: STUN alone covers most home networks.
-    return json({ iceServers: PUBLIC_STUN.map((urls) => ({ urls })), turn: false });
+    return json({ iceServers: freeIceServers(), turn: 'public' });
   }
 
   const ttl = Number(env.TURN_TTL_SECONDS ?? DEFAULT_TURN_TTL) || DEFAULT_TURN_TTL;
@@ -95,18 +120,20 @@ async function turnCredentials(request: Request, env: Env): Promise<Response> {
   if (!response.ok) {
     const detail = await response.text();
     console.error('TURN mint failed', response.status, detail);
-    return json({ iceServers: PUBLIC_STUN.map((urls) => ({ urls })), turn: false }, 200);
+    return json({ iceServers: freeIceServers(), turn: 'public' }, 200);
   }
 
   const body = (await response.json()) as { iceServers?: unknown };
   const minted = body.iceServers;
   const servers = Array.isArray(minted) ? minted : minted ? [minted] : [];
 
+  if (servers.length === 0) return json({ iceServers: freeIceServers(), turn: 'public' });
+
   return json({
     // Cloudflare's TURN first, public STUN behind it for redundancy.
     iceServers: [...servers, ...PUBLIC_STUN.map((urls) => ({ urls }))],
     ttl,
-    turn: servers.length > 0,
+    turn: 'cloudflare',
   });
 }
 

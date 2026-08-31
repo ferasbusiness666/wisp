@@ -60,6 +60,7 @@ cd worker
 npm install
 npx wrangler login
 npx wrangler deploy                       # first deploy creates the Worker
+# Optional. Skip these and the Worker falls back to a free public relay.
 npx wrangler secret put TURN_KEY_ID       # from Realtime -> TURN Keys
 npx wrangler secret put TURN_KEY_API_TOKEN
 ```
@@ -129,12 +130,21 @@ offer/answer/ICE find a device), and the list of codes it's watching is its
 
 ### TURN
 
-`GET /turn-credentials` makes the Worker call Cloudflare Realtime's
-`generate-ice-servers` endpoint with a 24-hour TTL — long enough that no call
-ever needs a mid-call credential refresh — and hands back an `iceServers` array
-the app passes straight into `RTCConfiguration`. Google's public STUN is
-appended for redundancy. If the TURN mint fails, the endpoint degrades to
-STUN-only rather than failing the call.
+`GET /turn-credentials` hands the app an `iceServers` array it passes straight
+into `RTCConfiguration`.
+
+TURN is **optional**. Set `TURN_KEY_ID` and `TURN_KEY_API_TOKEN` and the Worker
+mints Cloudflare Realtime credentials with a 24-hour TTL — long enough that no
+call needs a mid-call refresh. Leave them unset (Cloudflare Realtime asks for a
+payment method even on its free tier) and the Worker returns public STUN plus a
+free community TURN relay instead, so calls still have a fallback path at no
+cost. Either way STUN is tried first and a relay is only used when the two
+phones cannot reach each other directly; WebRTC encrypts media end to end, so a
+relay operator carries packets it cannot read.
+
+The free relay is a shared service with no uptime guarantee. If calls connect on
+WiFi but not on mobile data, that relay is the thing to replace — by adding a
+Cloudflare TURN key, or by pointing `PUBLIC_TURN` at another provider.
 
 ### Media
 
