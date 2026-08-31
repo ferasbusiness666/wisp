@@ -13,6 +13,7 @@ object DeviceIdentity {
     private const val ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     private const val LENGTH = 8
     private const val KEY = "device_code"
+    private const val KEY_NAME = "device_name"
 
     @Volatile
     private var cached: String? = null
@@ -39,6 +40,20 @@ object DeviceIdentity {
         return buildString(LENGTH) {
             repeat(LENGTH) { append(ALPHABET[random.nextInt(ALPHABET.length)]) }
         }
+    }
+
+    /**
+     * The name others see for this device in their "people online" list. Falls
+     * back to the phone's model so the entry is never blank before it is set.
+     */
+    fun myName(context: Context): String {
+        val stored = Prefs.of(context).getString(KEY_NAME, null)
+        if (!stored.isNullOrBlank()) return stored
+        return android.os.Build.MODEL?.takeIf { it.isNotBlank() } ?: "Wisp phone"
+    }
+
+    fun setMyName(context: Context, name: String) {
+        Prefs.of(context).edit().putString(KEY_NAME, name.trim().take(40)).apply()
     }
 
     /** Codes are compared upper-cased and stripped of separators people type. */

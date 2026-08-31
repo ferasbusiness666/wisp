@@ -139,11 +139,15 @@ async function turnCredentials(request: Request, env: Env): Promise<Response> {
 
 interface Attachment {
   code: string;
+  /** Display name this device published, shown to others in the directory. */
+  name: string;
   watching: string[];
 }
 
 type Inbound =
   | { type: 'watch'; codes?: unknown }
+  | { type: 'identify'; name?: unknown }
+  | { type: 'directory' }
   | { type: 'offer' | 'answer'; to?: unknown; sdp?: unknown }
   | { type: 'ice'; to?: unknown; mid?: unknown; index?: unknown; candidate?: unknown }
   | { type: 'bye'; to?: unknown; reason?: unknown }
@@ -185,10 +189,11 @@ export class Signaling implements DurableObject {
 
     // The tag is how offer/answer/ice find this device later.
     this.ctx.acceptWebSocket(server, [code]);
-    server.serializeAttachment({ code, watching: [] } satisfies Attachment);
+    server.serializeAttachment({ code, name: '', watching: [] } satisfies Attachment);
     server.send(JSON.stringify({ type: 'hello', code }));
 
     this.broadcastPresence(code, true);
+    this.broadcastDirectory();
 
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -215,11 +220,29 @@ export class Signaling implements DurableObject {
               .filter((c) => CODE_RE.test(c))
               .slice(0, 100)
           : [];
-        ws.serializeAttachment({ code: self.code, watching: codes } satisfies Attachment);
+        ws.serializeAttachment(
+          { code: self.code, name: self.name, watching: codes } satisfies Attachment
+        );
 
         const states: Record<string, boolean> = {};
         for (const code of codes) states[code] = this.isOnline(code);
         ws.send(JSON.stringify({ type: 'presence', states }));
+        return;
+      }
+
+      case 'identify': {
+        // A device publishing the name others should see for it.
+        const raw = typeof message.name === 'string' ? message.name : '';
+        const name = raw.trim().slice(0, 40);
+        ws.serializeAttachment(
+          { code: self.code, name, watching: self.watching } satisfies Attachment
+        );
+        this.broadcastDirectory();
+        return;
+      }
+
+      case 'directory': {
+        ws.send(JSON.stringify({ type: 'directory', people: this.buildDirectory() }));
         return;
       }
 
@@ -286,12 +309,17 @@ export class Signaling implements DurableObject {
     // offline when this was the device's last one.
     const remaining = this.ctx.getWebSockets(self.code).filter((s) => s !== ws);
     if (remaining.length === 0) this.broadcastPresence(self.code, false);
+    this.broadcastDirectory(ws);
   }
 
   private attachment(ws: WebSocket): Attachment | null {
     const raw = ws.deserializeAttachment() as Attachment | null;
     if (!raw || typeof raw.code !== 'string') return null;
-    return { code: raw.code, watching: Array.isArray(raw.watching) ? raw.watching : [] };
+    return {
+      code: raw.code,
+      name: typeof raw.name === 'string' ? raw.name : '',
+      watching: Array.isArray(raw.watching) ? raw.watching : [],
+    };
   }
 
   private target(value: unknown): string | null {
@@ -317,6 +345,38 @@ export class Signaling implements DurableObject {
         socket.send(body);
       } catch {
         // The socket is on its way out; its close handler will fix presence.
+      }
+    }
+  }
+
+  /**
+   * Everyone currently connected, so a device can offer them as people to add
+   * instead of making someone type a code. One entry per code even if a device
+   * has more than one socket open.
+   */
+  private buildDirectory(exclude?: WebSocket): Array<{ code: string; name: string }> {
+    const byCode = new Map<string, string>();
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket === exclude) continue;
+      const who = this.attachment(socket);
+      if (!who) continue;
+      // A later socket with a real name wins over an earlier blank one.
+      if (!byCode.has(who.code) || (who.name && !byCode.get(who.code))) {
+        byCode.set(who.code, who.name);
+      }
+    }
+    return [...byCode].map(([code, name]) => ({ code, name }));
+  }
+
+  /** Pushed on every join, leave and rename, so lists stay live. */
+  private broadcastDirectory(exclude?: WebSocket): void {
+    const body = JSON.stringify({ type: 'directory', people: this.buildDirectory(exclude) });
+    for (const socket of this.ctx.getWebSockets()) {
+      if (socket === exclude) continue;
+      try {
+        socket.send(body);
+      } catch {
+        // On its way out; its close handler will refresh the directory.
       }
     }
   }

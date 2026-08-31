@@ -6,7 +6,11 @@
     <string name="my_code_label">Your code</string>
     <string name="copy">Copy</string>
     <string name="code_copied">Code copied</string>
-    <string name="add_contact_label">Add a contact</string>
+    <string name="my_name_label">Your name</string>
+    <string name="my_name_hint">What others see</string>
+    <string name="online_now">Online now — tap to add</string>
+    <string name="tap_to_add">Add</string>
+    <string name="add_by_code_label">Or add by code</string>
     <string name="add_hint_code">Their code</string>
     <string name="add_hint_name">Name them</string>
     <string name="add">Add</string>

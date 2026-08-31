@@ -21,6 +21,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: ContactAdapter
+    private lateinit var directoryAdapter: DirectoryAdapter
     private var pendingCall: Contact? = null
 
     private val settingsLauncher =
@@ -53,6 +54,12 @@ class MainActivity : AppCompatActivity() {
         adapter = ContactAdapter(onCall = ::onContactTapped, onRemove = ::confirmRemove)
         binding.contacts.layoutManager = LinearLayoutManager(this)
         binding.contacts.adapter = adapter
+
+        directoryAdapter = DirectoryAdapter(onAdd = ::addDiscovered)
+        binding.discovered.layoutManager = LinearLayoutManager(this)
+        binding.discovered.adapter = directoryAdapter
+
+        setUpNameField()
 
         binding.addButton.setOnClickListener { addContact() }
 
@@ -89,6 +96,11 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    override fun onPause() {
+        super.onPause()
+        commitName()
+    }
+
     override fun onResume() {
         super.onResume()
         refreshList()
@@ -102,9 +114,20 @@ class MainActivity : AppCompatActivity() {
     private fun observeState() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(CallStateHolder.presence, CallStateHolder.signalingOnline) { presence, online ->
-                    presence to online
-                }.collect { (presence, online) ->
+                combine(
+                    CallStateHolder.presence,
+                    CallStateHolder.signalingOnline,
+                    CallStateHolder.directory
+                ) { presence, online, directory ->
+                    Triple(presence, online, directory)
+                }.collect { (presence, online, directory) ->
+                    val saved = ContactStore.codes(this@MainActivity).toSet()
+                    val unsaved = directory.filterNot { it.code in saved }
+                    directoryAdapter.submitList(unsaved)
+                    binding.discoveredCard.visibility =
+                        if (unsaved.isEmpty()) android.view.View.GONE
+                        else android.view.View.VISIBLE
+
                     binding.connectionStatus.setText(
                         if (online) R.string.status_connected else R.string.status_connecting
                     )
@@ -130,6 +153,36 @@ class MainActivity : AppCompatActivity() {
         binding.emptyHint.visibility =
             if (ContactStore.all(this).isEmpty()) android.view.View.VISIBLE
             else android.view.View.GONE
+    }
+
+    /**
+     * The name is what the other phone shows instead of a code, so it is
+     * republished as soon as editing finishes rather than needing a save button.
+     */
+    private fun setUpNameField() {
+        binding.myName.setText(DeviceIdentity.myName(this))
+        binding.myName.setOnEditorActionListener { view, _, _ ->
+            commitName()
+            view.clearFocus()
+            true
+        }
+        binding.myName.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) commitName() }
+    }
+
+    private fun commitName() {
+        val typed = binding.myName.text.toString().trim()
+        if (typed.isEmpty() || typed == DeviceIdentity.myName(this)) return
+        DeviceIdentity.setMyName(this, typed)
+        CallService.republishName(this)
+    }
+
+    /** One tap saves someone we can already see online — no code to type. */
+    private fun addDiscovered(person: Contact) {
+        if (ContactStore.add(this, person)) {
+            Toast.makeText(this, getString(R.string.contact_added, person.name), Toast.LENGTH_SHORT).show()
+            CallService.refreshContacts(this)
+            refreshList()
+        }
     }
 
     private fun copyCode(code: String) {

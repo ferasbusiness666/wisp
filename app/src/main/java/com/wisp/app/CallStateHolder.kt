@@ -40,6 +40,9 @@ object CallStateHolder {
     private val _presence = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     val presence: StateFlow<Map<String, Boolean>> = _presence
 
+    private val _directory = MutableStateFlow<List<Contact>>(emptyList())
+    val directory: StateFlow<List<Contact>> = _directory
+
     private val _signalingOnline = MutableStateFlow(false)
     val signalingOnline: StateFlow<Boolean> = _signalingOnline
 
@@ -57,6 +60,10 @@ object CallStateHolder {
 
     internal fun mergePresence(states: Map<String, Boolean>) {
         _presence.value = _presence.value + states
+    }
+
+    internal fun setDirectory(people: List<Contact>) {
+        _directory.value = people
     }
 
     internal fun setSignalingOnline(online: Boolean) {

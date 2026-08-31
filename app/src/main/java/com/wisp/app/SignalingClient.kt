@@ -30,6 +30,7 @@ class SignalingClient(
         fun onSignalingOpen()
         fun onSignalingClosed()
         fun onPresence(states: Map<String, Boolean>)
+        fun onDirectory(people: List<Contact>)
         fun onOffer(from: String, sdp: String)
         fun onAnswer(from: String, sdp: String)
         fun onRemoteIce(from: String, mid: String?, index: Int, candidate: String)
@@ -67,6 +68,7 @@ class SignalingClient(
         private set
 
     private var watching: List<String> = emptyList()
+    private var myName: String = ""
 
     fun connect() {
         wanted = true
@@ -101,6 +103,17 @@ class SignalingClient(
     fun watch(codes: List<String>) {
         watching = codes
         if (isOpen) sendWatch()
+    }
+
+    /** Publishes the name other devices should show for us. */
+    fun identify(name: String) {
+        myName = name
+        if (isOpen) sendIdentify()
+    }
+
+    private fun sendIdentify() {
+        send(JSONObject().put("type", "identify").put("name", myName))
+        send(JSONObject().put("type", "directory"))
     }
 
     private fun openSocket() {
@@ -168,6 +181,7 @@ class SignalingClient(
                 isOpen = true
                 attempt = 0
                 sendWatch()
+                sendIdentify()
                 listener.onSignalingOpen()
             }
         }
@@ -209,6 +223,18 @@ class SignalingClient(
                 val single = json.optString("code")
                 if (single.isNotEmpty()) states[single] = json.optBoolean("online")
                 if (states.isNotEmpty()) listener.onPresence(states)
+            }
+            "directory" -> {
+                val array = json.optJSONArray("people")
+                val people = buildList {
+                    for (i in 0 until (array?.length() ?: 0)) {
+                        val entry = array?.optJSONObject(i) ?: continue
+                        val code = entry.optString("code").takeIf { it.isNotEmpty() } ?: continue
+                        val name = entry.optString("name").takeIf { it.isNotBlank() } ?: code
+                        add(Contact(code, name))
+                    }
+                }
+                listener.onDirectory(people)
             }
             "offer" -> listener.onOffer(json.optString("from"), json.optString("sdp"))
             "answer" -> listener.onAnswer(json.optString("from"), json.optString("sdp"))
