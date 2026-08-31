@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.view.View
 import android.view.WindowManager
 import android.widget.SeekBar
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
@@ -181,7 +182,13 @@ class CallActivity : AppCompatActivity() {
             }
             if (!finishing) {
                 finishing = true
-                state.endReason?.let { binding.status.text = it }
+                // Setting a label on a screen that is about to close shows the
+                // user nothing; a toast outlives the activity, and MainActivity
+                // repeats it if this screen was never on top.
+                state.endReason?.let {
+                    Toast.makeText(applicationContext, it, Toast.LENGTH_LONG).show()
+                    CallStateHolder.consumeEndReason()
+                }
                 detachTracks()
                 finish()
             }

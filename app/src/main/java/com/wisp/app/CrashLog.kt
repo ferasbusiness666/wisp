@@ -20,6 +20,8 @@ import java.util.Locale
 object CrashLog {
 
     private const val KEY = "last_crash"
+    private const val KEY_STEP = "last_step"
+    private const val KEY_IN_PROGRESS = "step_in_progress"
 
     fun install(context: Context) {
         val app = context.applicationContext
@@ -50,6 +52,39 @@ object CrashLog {
         }
 
         Prefs.of(context).edit().putString(KEY, report).commit()
+    }
+
+    /**
+     * Records how far call setup got. A crash inside the native WebRTC library
+     * never reaches an uncaught-exception handler, so the Java stack trace above
+     * would be empty; the last breadcrumb is then the only thing that says which
+     * step the process died on.
+     */
+    @SuppressLint("ApplySharedPref")
+    fun step(context: Context, step: String) {
+        Prefs.of(context).edit()
+            .putString(KEY_STEP, step)
+            .putBoolean(KEY_IN_PROGRESS, true)
+            .commit()
+    }
+
+    /** Call setup finished — cleanly or not — so the breadcrumb is no longer live. */
+    fun stepDone(context: Context) {
+        Prefs.of(context).edit().putBoolean(KEY_IN_PROGRESS, false).apply()
+    }
+
+    /**
+     * Non-null when the last run died partway through call setup: the app was
+     * mid-step and never reported finishing.
+     */
+    fun unfinishedStep(context: Context): String? {
+        val prefs = Prefs.of(context)
+        if (!prefs.getBoolean(KEY_IN_PROGRESS, false)) return null
+        return prefs.getString(KEY_STEP, null)
+    }
+
+    fun clearStep(context: Context) {
+        Prefs.of(context).edit().putBoolean(KEY_IN_PROGRESS, false).apply()
     }
 
     fun lastCrash(context: Context): String? =

@@ -82,14 +82,31 @@ class MainActivity : AppCompatActivity() {
      * just an app that vanished, with nothing to act on.
      */
     private fun showCrashReportIfAny() {
-        val report = CrashLog.lastCrash(this) ?: return
+        // A native crash leaves no Java stack trace, so an unfinished step is
+        // the only evidence of where the process died.
+        val unfinished = CrashLog.unfinishedStep(this)
+        val report = CrashLog.lastCrash(this)
+
+        if (report == null && unfinished != null) {
+            CrashLog.clearStep(this)
+            AlertDialog.Builder(this)
+                .setTitle(R.string.crash_title)
+                .setMessage(getString(R.string.crash_step_message, unfinished))
+                .setPositiveButton(R.string.crash_copy) { _, _ ->
+                    copyToClipboard("Wisp stopped during: $unfinished")
+                }
+                .setNegativeButton(R.string.crash_dismiss, null)
+                .show()
+            return
+        }
+        if (report == null) return
+        val full = if (unfinished != null) "$report\n\nstopped during: $unfinished" else report
+        CrashLog.clearStep(this)
         AlertDialog.Builder(this)
             .setTitle(R.string.crash_title)
-            .setMessage(getString(R.string.crash_message, report))
+            .setMessage(getString(R.string.crash_message, full))
             .setPositiveButton(R.string.crash_copy) { _, _ ->
-                val clipboard = getSystemService(ClipboardManager::class.java)
-                clipboard?.setPrimaryClip(ClipData.newPlainText("Wisp crash", report))
-                Toast.makeText(this, R.string.crash_copied, Toast.LENGTH_SHORT).show()
+                copyToClipboard(full)
                 CrashLog.clear(this)
             }
             .setNegativeButton(R.string.crash_dismiss) { _, _ -> CrashLog.clear(this) }
@@ -104,6 +121,12 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshList()
+        CallStateHolder.consumeEndReason()?.let {
+            Toast.makeText(this, it, Toast.LENGTH_LONG).show()
+        }
+        // The directory is otherwise only pushed when somebody joins or leaves,
+        // so a screen opened in between would show nothing.
+        CallService.refreshDirectory(this)
         // If a call is already live (e.g. we came back from the launcher during
         // one), jump straight back into it.
         if (CallStateHolder.call.value.phase != CallPhase.IDLE) {
@@ -117,16 +140,26 @@ class MainActivity : AppCompatActivity() {
                 combine(
                     CallStateHolder.presence,
                     CallStateHolder.signalingOnline,
-                    CallStateHolder.directory
-                ) { presence, online, directory ->
+                    CallStateHolder.directory,
+                    CallStateHolder.contactsRevision
+                ) { presence, online, directory, _ ->
                     Triple(presence, online, directory)
                 }.collect { (presence, online, directory) ->
                     val saved = ContactStore.codes(this@MainActivity).toSet()
                     val unsaved = directory.filterNot { it.code in saved }
                     directoryAdapter.submitList(unsaved)
-                    binding.discoveredCard.visibility =
+                    // Keep the card up even when empty: a section that vanishes
+                    // reads as broken, where "nobody else is online" is an answer.
+                    binding.discoveredCard.visibility = android.view.View.VISIBLE
+                    binding.discovered.visibility =
                         if (unsaved.isEmpty()) android.view.View.GONE
                         else android.view.View.VISIBLE
+                    binding.discoveredEmpty.visibility =
+                        if (unsaved.isEmpty()) android.view.View.VISIBLE
+                        else android.view.View.GONE
+                    binding.discoveredEmpty.setText(
+                        if (online) R.string.nobody_online else R.string.status_connecting
+                    )
 
                     binding.connectionStatus.setText(
                         if (online) R.string.status_connected else R.string.status_connecting
@@ -181,8 +214,16 @@ class MainActivity : AppCompatActivity() {
         if (ContactStore.add(this, person)) {
             Toast.makeText(this, getString(R.string.contact_added, person.name), Toast.LENGTH_SHORT).show()
             CallService.refreshContacts(this)
+            // Saving is mutual, so they don't have to add us separately.
+            CallService.askToBeAdded(this, person.code)
             refreshList()
         }
+    }
+
+    private fun copyToClipboard(text: String) {
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard?.setPrimaryClip(ClipData.newPlainText("Wisp", text))
+        Toast.makeText(this, R.string.crash_copied, Toast.LENGTH_SHORT).show()
     }
 
     private fun copyCode(code: String) {
@@ -212,6 +253,7 @@ class MainActivity : AppCompatActivity() {
                 // number. Both sides add each other once.
                 Toast.makeText(this, getString(R.string.contact_added, name), Toast.LENGTH_SHORT).show()
                 CallService.refreshContacts(this)
+                CallService.askToBeAdded(this, code)
                 refreshList()
             }
         }

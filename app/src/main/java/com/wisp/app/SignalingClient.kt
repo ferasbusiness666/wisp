@@ -31,6 +31,7 @@ class SignalingClient(
         fun onSignalingClosed()
         fun onPresence(states: Map<String, Boolean>)
         fun onDirectory(people: List<Contact>)
+        fun onAddMe(code: String, name: String)
         fun onOffer(from: String, sdp: String)
         fun onAnswer(from: String, sdp: String)
         fun onRemoteIce(from: String, mid: String?, index: Int, candidate: String)
@@ -161,6 +162,15 @@ class SignalingClient(
     fun sendBye(to: String, reason: String) =
         send(JSONObject().put("type", "bye").put("to", to).put("reason", reason))
 
+    /** Asks the other side to save us too, so adding only has to happen once. */
+    fun sendAddMe(to: String) =
+        send(JSONObject().put("type", "add-me").put("to", to))
+
+    /** Re-reads who is online; the list is otherwise only pushed on changes. */
+    fun requestDirectory() {
+        send(JSONObject().put("type", "directory"))
+    }
+
     fun requestIceRestart(to: String) =
         send(JSONObject().put("type", "ice-restart").put("to", to))
 
@@ -249,6 +259,11 @@ class SignalingClient(
                 json.optString("reason").takeIf { it.isNotEmpty() }
             )
             "ice-restart" -> listener.onIceRestartRequest(json.optString("from"))
+            "add-me" -> {
+                val code = json.optString("from")
+                val name = json.optString("name").takeIf { it.isNotBlank() } ?: code
+                if (code.isNotEmpty()) listener.onAddMe(code, name)
+            }
             "unavailable" -> listener.onPeerUnavailable(
                 json.optString("to"),
                 json.optString("reason").takeIf { it.isNotEmpty() }

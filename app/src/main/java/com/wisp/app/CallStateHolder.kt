@@ -43,12 +43,26 @@ object CallStateHolder {
     private val _directory = MutableStateFlow<List<Contact>>(emptyList())
     val directory: StateFlow<List<Contact>> = _directory
 
+    /** Bumped when the service changes the contact list, so the UI reloads. */
+    private val _contactsRevision = MutableStateFlow(0)
+    val contactsRevision: StateFlow<Int> = _contactsRevision
+
     private val _signalingOnline = MutableStateFlow(false)
     val signalingOnline: StateFlow<Boolean> = _signalingOnline
 
     /** Live engine for the current call, so the UI can attach renderers. */
     @Volatile
     var engine: CallEngine? = null
+
+    /**
+     * Reads the reason the last call ended and clears it, so a failure is
+     * reported to the user exactly once.
+     */
+    fun consumeEndReason(): String? {
+        val reason = _call.value.endReason ?: return null
+        _call.value = _call.value.copy(endReason = null)
+        return reason
+    }
 
     internal fun update(block: (CallUi) -> CallUi) {
         _call.value = block(_call.value)
@@ -60,6 +74,10 @@ object CallStateHolder {
 
     internal fun mergePresence(states: Map<String, Boolean>) {
         _presence.value = _presence.value + states
+    }
+
+    internal fun bumpContacts() {
+        _contactsRevision.value = _contactsRevision.value + 1
     }
 
     internal fun setDirectory(people: List<Contact>) {
