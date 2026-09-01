@@ -123,7 +123,7 @@ class CallActivity : AppCompatActivity() {
     }
 
     private fun initRenderers() {
-        val eglContext = RtcCore.eglBase.eglBaseContext
+        val eglContext = RtcCore.eglBase(this).eglBaseContext
         binding.remoteView.init(eglContext, null)
         binding.remoteView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
         binding.remoteView.setEnableHardwareScaler(true)

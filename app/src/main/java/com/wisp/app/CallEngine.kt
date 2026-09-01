@@ -125,7 +125,7 @@ class CallEngine(
 
         val capturer = createCameraCapturer()
         if (capturer != null) {
-            val helper = SurfaceTextureHelper.create("WispCapture", RtcCore.eglBase.eglBaseContext)
+            val helper = SurfaceTextureHelper.create("WispCapture", RtcCore.eglBase(appContext).eglBaseContext)
             val source = factory.createVideoSource(capturer.isScreencast)
             capturer.initialize(helper, appContext, source.capturerObserver)
             surfaceHelper = helper

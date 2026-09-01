@@ -86,21 +86,25 @@ class MainActivity : AppCompatActivity() {
         // the only evidence of where the process died.
         val unfinished = CrashLog.unfinishedStep(this)
         val report = CrashLog.lastCrash(this)
+        val exit = CrashLog.lastExitReason(this)
 
         if (report == null && unfinished != null) {
             CrashLog.clearStep(this)
+            val detail = listOfNotNull("stopped during: $unfinished", exit).joinToString("\n\n")
             AlertDialog.Builder(this)
                 .setTitle(R.string.crash_title)
-                .setMessage(getString(R.string.crash_step_message, unfinished))
-                .setPositiveButton(R.string.crash_copy) { _, _ ->
-                    copyToClipboard("Wisp stopped during: $unfinished")
-                }
+                .setMessage(getString(R.string.crash_step_message, detail))
+                .setPositiveButton(R.string.crash_copy) { _, _ -> copyToClipboard(detail) }
                 .setNegativeButton(R.string.crash_dismiss, null)
                 .show()
             return
         }
         if (report == null) return
-        val full = if (unfinished != null) "$report\n\nstopped during: $unfinished" else report
+        val full = listOfNotNull(
+            report,
+            unfinished?.let { "stopped during: $it" },
+            exit
+        ).joinToString("\n\n")
         CrashLog.clearStep(this)
         AlertDialog.Builder(this)
             .setTitle(R.string.crash_title)
