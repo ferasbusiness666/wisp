@@ -20,3 +20,18 @@
 -keepclassmembers class * implements android.os.Parcelable {
     public static final ** CREATOR;
 }
+
+# --- jni_zero ---------------------------------------------------------------
+# Newer WebRTC looks these up by name in JNI_OnLoad. If R8 renames them, the
+# native library hits a CHECK and the process dies with SIGTRAP on load.
+-keep class org.jni_zero.** { *; }
+-dontwarn org.jni_zero.**
+-keepclasseswithmembers,includedescriptorclasses class * {
+    @org.jni_zero.CalledByNative <methods>;
+}
+-keepclasseswithmembers,includedescriptorclasses class * {
+    @org.jni_zero.CalledByNativeUnchecked <methods>;
+}
+-keepclasseswithmembers class * {
+    @org.jni_zero.AccessedByNative <fields>;
+}
