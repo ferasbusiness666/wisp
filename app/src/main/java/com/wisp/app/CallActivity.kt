@@ -131,7 +131,6 @@ class CallActivity : AppCompatActivity() {
         binding.localView.init(eglContext, null)
         binding.localView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
         binding.localView.setEnableHardwareScaler(true)
-        binding.localView.setMirror(true)
         binding.localView.setZOrderMediaOverlay(true)
         renderersReady = true
     }
@@ -234,7 +233,8 @@ class CallActivity : AppCompatActivity() {
         binding.toggleCamera.setImageResource(
             if (state.cameraOn) R.drawable.ic_video_on else R.drawable.ic_video_off
         )
-        binding.localView.visibility = if (state.cameraOn) View.VISIBLE else View.INVISIBLE
+        binding.localPip.visibility = if (state.cameraOn) View.VISIBLE else View.INVISIBLE
+        binding.localView.setMirror(state.frontCamera)
 
         if (binding.volumeSlider.progress != state.volumePercent) {
             binding.volumeSlider.progress = state.volumePercent

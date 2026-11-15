@@ -317,7 +317,14 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
             return null
         }
         call.setRemoteVolume(CallStateHolder.call.value.volumePercent / 100.0)
-        publish { it.copy(micMuted = call.micMuted, cameraOn = call.cameraEnabled) }
+        publish {
+            it.copy(
+                micMuted = call.micMuted,
+                cameraOn = call.cameraEnabled,
+                frontCamera = call.isFrontCamera(),
+                mediaVersion = it.mediaVersion + 1
+            )
+        }
         CrashLog.stepDone(this)
         return call
     }
@@ -507,9 +514,10 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
     }
 
     override fun onRemoteVideoTrack(track: VideoTrack) {
-        // The activity picks the track up from the engine when it attaches its
-        // renderers; nothing to do here beyond keeping the reference alive.
+        // The activity reads the track from the engine; bumping the version is
+        // what tells it there is a new one to attach.
         Log.i(TAG, "remote video track ${track.id()}")
+        publish { it.copy(mediaVersion = it.mediaVersion + 1) }
     }
 
     override fun onRenegotiationFailed(reason: String) {
@@ -645,7 +653,7 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
     }
 
     fun switchCamera() {
-        engine?.switchCamera()
+        engine?.switchCamera { front -> publish { it.copy(frontCamera = front) } }
     }
 
     fun setVolumePercent(percent: Int) {

@@ -304,11 +304,14 @@ class CallEngine(
         if (enabled) startCapture() else stopCapture()
     }
 
-    fun switchCamera() {
+    fun switchCamera(onSwitched: (isFrontFacing: Boolean) -> Unit = {}) {
         val capturer = videoCapturer ?: return
         capturer.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
             override fun onCameraSwitchDone(isFrontFacing: Boolean) {
-                frontCamera = isFrontFacing
+                post {
+                    frontCamera = isFrontFacing
+                    onSwitched(isFrontFacing)
+                }
             }
 
             override fun onCameraSwitchError(error: String?) {

@@ -23,9 +23,17 @@ data class CallUi(
     val peerName: String? = null,
     val micMuted: Boolean = false,
     val cameraOn: Boolean = true,
+    /** Front camera previews are mirrored; the back camera's must not be. */
+    val frontCamera: Boolean = true,
     val volumePercent: Int = 100,
     val connectedAtMs: Long = 0L,
-    val endReason: String? = null
+    val endReason: String? = null,
+    /**
+     * Bumped whenever a local or remote video track appears. Tracks live on the
+     * engine, not in this state, so without it an otherwise-unchanged state
+     * would never reach the screen and the new track would never be attached.
+     */
+    val mediaVersion: Int = 0
 )
 
 /**
