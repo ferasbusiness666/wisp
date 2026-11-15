@@ -25,6 +25,11 @@ data class CallUi(
     val cameraOn: Boolean = true,
     /** Front camera previews are mirrored; the back camera's must not be. */
     val frontCamera: Boolean = true,
+    /** Loudspeaker (true) or the private route: headset, Bluetooth or earpiece. */
+    val speakerOn: Boolean = true,
+    /** What the other phone last told us over the data channel. */
+    val remoteMicOn: Boolean = true,
+    val remoteCameraOn: Boolean = true,
     val volumePercent: Int = 100,
     val connectedAtMs: Long = 0L,
     val endReason: String? = null,

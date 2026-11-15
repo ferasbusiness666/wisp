@@ -14,6 +14,9 @@ import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RTCStats
+import org.webrtc.RTCStatsCollectorCallback
+import org.webrtc.RTCStatsReport
 import org.webrtc.RtpParameters
 import org.webrtc.RtpReceiver
 import org.webrtc.RtpSender
@@ -23,6 +26,8 @@ import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
+import org.json.JSONObject
+import java.nio.ByteBuffer
 
 /**
  * One 1:1 call: the peer connection, the local camera/mic and the knobs the UI
@@ -40,6 +45,8 @@ class CallEngine(
         fun onIceStateChanged(state: PeerConnection.IceConnectionState)
         fun onRemoteVideoTrack(track: VideoTrack)
         fun onRenegotiationFailed(reason: String)
+        /** The other phone told us its mic/camera state over the data channel. */
+        fun onRemoteMediaState(micOn: Boolean, cameraOn: Boolean)
     }
 
     companion object {
@@ -88,6 +95,12 @@ class CallEngine(
     var remoteVideoTrack: VideoTrack? = null
         private set
     private var remoteAudioTrack: AudioTrack? = null
+
+    /**
+     * Tiny peer-to-peer channel for "my mic/camera is on/off". It goes straight
+     * between the phones, so the signaling Worker never has to know about it.
+     */
+    private var stateChannel: DataChannel? = null
 
     private var videoSender: RtpSender? = null
     private var audioSender: RtpSender? = null
@@ -162,6 +175,16 @@ class CallEngine(
 
         localAudioTrack?.let { audioSender = connection.addTrack(it, listOf(STREAM_ID)) }
         localVideoTrack?.let { videoSender = connection.addTrack(it, listOf(STREAM_ID)) }
+        // Negotiated with a fixed id on both sides, so it exists before the offer
+        // and neither phone has to wait for the other to announce it.
+        stateChannel = connection.createDataChannel(
+            "state",
+            DataChannel.Init().apply {
+                negotiated = true
+                id = 0
+                ordered = true
+            }
+        )?.also { it.registerObserver(StateChannelObserver(it)) }
         applyVideoEncoding()
         if (micMuted) applyMicMute()
         return true
@@ -187,6 +210,14 @@ class CallEngine(
     }
 
     private fun closePeerConnection() {
+        stateChannel?.let { channel ->
+            runCatching {
+                channel.unregisterObserver()
+                channel.close()
+                channel.dispose()
+            }
+        }
+        stateChannel = null
         videoSender = null
         audioSender = null
         peerConnection?.let { connection ->
@@ -290,6 +321,7 @@ class CallEngine(
     fun setMicMuted(muted: Boolean) {
         micMuted = muted
         applyMicMute()
+        sendMediaState()
     }
 
     private fun applyMicMute() {
@@ -302,6 +334,86 @@ class CallEngine(
         cameraEnabled = enabled
         localVideoTrack?.setEnabled(enabled)
         if (enabled) startCapture() else stopCapture()
+        sendMediaState()
+    }
+
+    /** Tells the other phone whether our mic and camera are on. */
+    fun sendMediaState() {
+        val channel = stateChannel ?: return
+        if (channel.state() != DataChannel.State.OPEN) return
+        val json = JSONObject().put("mic", !micMuted).put("cam", cameraEnabled).toString()
+        runCatching {
+            channel.send(DataChannel.Buffer(ByteBuffer.wrap(json.toByteArray(Charsets.UTF_8)), false))
+        }
+    }
+
+    /**
+     * Human-readable snapshot of what the call is actually doing: whether video
+     * frames are being encoded and sent, received and decoded, and which network
+     * path carries them. This is what tells "camera not showing" apart from
+     * "camera not sending" and "network not passing video".
+     */
+    fun collectStats(onResult: (String) -> Unit) {
+        val connection = peerConnection ?: run {
+            onResult("No active connection")
+            return
+        }
+        connection.getStats(RTCStatsCollectorCallback { report ->
+            val text = runCatching { describe(report) }.getOrElse { "Stats failed: ${it.message}" }
+            post { onResult(text) }
+        })
+    }
+
+    private fun describe(report: RTCStatsReport): String {
+        val all = report.statsMap.values
+        fun RTCStats.m(key: String): Any? = members[key]
+        fun num(value: Any?): Long = (value as? Number)?.toLong() ?: 0L
+        fun kb(value: Any?): String = "${num(value) / 1024} KB"
+        fun codecOf(stats: RTCStats): String {
+            val id = stats.m("codecId") as? String ?: return "?"
+            return report.statsMap[id]?.m("mimeType") as? String ?: "?"
+        }
+
+        val lines = mutableListOf<String>()
+
+        val out = all.filter { it.type == "outbound-rtp" && it.m("kind") == "video" }
+        if (out.isEmpty()) lines += "SENDING VIDEO: no video sender"
+        out.forEach { s ->
+            lines += "SENDING VIDEO (${codecOf(s)})"
+            lines += "  frames encoded ${num(s.m("framesEncoded"))}, sent ${num(s.m("framesSent"))}"
+            lines += "  size ${s.m("frameWidth") ?: "-"}x${s.m("frameHeight") ?: "-"} at ${s.m("framesPerSecond") ?: 0} fps"
+            lines += "  encoder ${s.m("encoderImplementation") ?: "?"}"
+            lines += "  limited by ${s.m("qualityLimitationReason") ?: "none"}"
+            lines += "  sent ${kb(s.m("bytesSent"))}"
+        }
+
+        val inbound = all.filter { it.type == "inbound-rtp" && it.m("kind") == "video" }
+        if (inbound.isEmpty()) lines += "RECEIVING VIDEO: nothing yet"
+        inbound.forEach { s ->
+            lines += "RECEIVING VIDEO (${codecOf(s)})"
+            lines += "  frames received ${num(s.m("framesReceived"))}, decoded ${num(s.m("framesDecoded"))}, dropped ${num(s.m("framesDropped"))}"
+            lines += "  size ${s.m("frameWidth") ?: "-"}x${s.m("frameHeight") ?: "-"} at ${s.m("framesPerSecond") ?: 0} fps"
+            lines += "  decoder ${s.m("decoderImplementation") ?: "?"}"
+            lines += "  received ${kb(s.m("bytesReceived"))}"
+        }
+
+        val pair = all.firstOrNull {
+            it.type == "candidate-pair" && it.m("state") == "succeeded" && it.m("nominated") == true
+        }
+        if (pair == null) {
+            lines += "NETWORK: no working path yet"
+        } else {
+            val local = report.statsMap[pair.m("localCandidateId") as? String]
+            val remote = report.statsMap[pair.m("remoteCandidateId") as? String]
+            lines += "NETWORK: ${local?.m("candidateType") ?: "?"} -> ${remote?.m("candidateType") ?: "?"}" +
+                " (${local?.m("protocol") ?: "?"})"
+            val rtt = (pair.m("currentRoundTripTime") as? Number)?.toDouble()
+            if (rtt != null) lines += "  round trip ${(rtt * 1000).toInt()} ms"
+            val up = (pair.m("availableOutgoingBitrate") as? Number)?.toLong()
+            if (up != null) lines += "  upload estimate ${up / 1000} kbps"
+        }
+        lines += "MY CAMERA: ${if (cameraEnabled) "on" else "off"}, capturing: $capturing"
+        return lines.joinToString("\n")
     }
 
     fun switchCamera(onSwitched: (isFrontFacing: Boolean) -> Unit = {}) {
@@ -421,6 +533,23 @@ class CallEngine(
         override fun onConnectionChange(state: PeerConnection.PeerConnectionState) = Unit
         override fun onStandardizedIceConnectionChange(state: PeerConnection.IceConnectionState) = Unit
         override fun onRemoveTrack(receiver: RtpReceiver) = Unit
+    }
+
+    private inner class StateChannelObserver(private val channel: DataChannel) : DataChannel.Observer {
+        override fun onBufferedAmountChange(previousAmount: Long) = Unit
+
+        override fun onStateChange() {
+            if (channel.state() == DataChannel.State.OPEN) post { sendMediaState() }
+        }
+
+        override fun onMessage(buffer: DataChannel.Buffer) {
+            val bytes = ByteArray(buffer.data.remaining())
+            buffer.data.get(bytes)
+            val json = runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull() ?: return
+            val mic = json.optBoolean("mic", true)
+            val cam = json.optBoolean("cam", true)
+            post { events.onRemoteMediaState(mic, cam) }
+        }
     }
 
     private open inner class SdpAdapter(private val label: String) : SdpObserver {

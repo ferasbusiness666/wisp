@@ -2,27 +2,44 @@ package com.wisp.app
 
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.Intent
 import android.os.Bundle
+import android.view.View
+import android.view.inputmethod.EditorInfo
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.wisp.app.databinding.ActivityMainBinding
+import com.wisp.app.databinding.SheetAddBinding
+import com.wisp.app.databinding.SheetContactBinding
+import com.wisp.app.databinding.SheetSettingsBinding
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
-/** Home screen: my code, add-a-contact, and the contact list. */
+/**
+ * Home: people online now, then your contacts. Your code, your name and
+ * updates live behind the profile button; adding someone is behind +.
+ */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: ContactAdapter
     private lateinit var directoryAdapter: DirectoryAdapter
     private var pendingCall: Contact? = null
+
+    /** The newest release found by the last check, if it's newer than us. */
+    private var availableUpdate: Updater.Release? = null
+    private var updating = false
+    private var settingsSheet: SheetSettingsBinding? = null
 
     private val settingsLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
@@ -44,24 +61,24 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applyInsets()
 
-        val myCode = DeviceIdentity.myCode(this)
-        binding.myCode.text = myCode
-        binding.copyCode.setOnClickListener { copyCode(myCode) }
-
-        adapter = ContactAdapter(onCall = ::onContactTapped, onRemove = ::confirmRemove)
+        adapter = ContactAdapter(onCall = ::onCallTapped, onOpen = ::openContact)
         binding.contacts.layoutManager = LinearLayoutManager(this)
         binding.contacts.adapter = adapter
 
         directoryAdapter = DirectoryAdapter(onAdd = ::addDiscovered)
-        binding.discovered.layoutManager = LinearLayoutManager(this)
+        binding.discovered.layoutManager =
+            LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         binding.discovered.adapter = directoryAdapter
 
-        setUpNameField()
-
-        binding.addButton.setOnClickListener { addContact() }
+        binding.addButton.setOnClickListener { openAddSheet() }
+        binding.settingsButton.setOnClickListener { openSettingsSheet() }
+        binding.returnToCall.setOnClickListener { startActivity(CallActivity.ongoingIntent(this)) }
+        binding.updateBanner.setOnClickListener { availableUpdate?.let { startUpdate(it) } }
 
         CallService.ensureRunning(this)
 
@@ -74,7 +91,252 @@ class MainActivity : AppCompatActivity() {
 
         observeState()
         showCrashReportIfAny()
+        checkForUpdate(quiet = true)
     }
+
+    override fun onResume() {
+        super.onResume()
+        refreshList()
+        CallStateHolder.consumeEndReason()?.let {
+            Toast.makeText(this, it, Toast.LENGTH_LONG).show()
+        }
+        // The directory is otherwise only pushed when somebody joins or leaves,
+        // so a screen opened in between would show nothing.
+        CallService.refreshDirectory(this)
+    }
+
+    private fun applyInsets() {
+        ViewCompat.setOnApplyWindowInsetsListener(binding.homeRoot) { view, insets ->
+            val bars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.updatePadding(left = bars.left, top = bars.top, right = bars.right, bottom = bars.bottom)
+            insets
+        }
+    }
+
+    // ---- state -------------------------------------------------------------
+
+    private fun observeState() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    combine(
+                        CallStateHolder.presence,
+                        CallStateHolder.signalingOnline,
+                        CallStateHolder.directory,
+                        CallStateHolder.contactsRevision
+                    ) { presence, online, directory, _ ->
+                        Triple(presence, online, directory)
+                    }.collect { (presence, online, directory) ->
+                        val saved = ContactStore.codes(this@MainActivity).toSet()
+                        val unsaved = directory.filterNot { it.code in saved }
+                        directoryAdapter.submitList(unsaved)
+                        binding.onlineSection.visibility =
+                            if (unsaved.isEmpty()) View.GONE else View.VISIBLE
+
+                        binding.connectionStatus.setText(
+                            if (online) R.string.status_connected else R.string.status_connecting
+                        )
+                        binding.connectionStatus.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                            if (online) R.drawable.dot_small_online else R.drawable.dot_small_offline,
+                            0, 0, 0
+                        )
+                        showContacts(presence, online)
+                    }
+                }
+                launch {
+                    CallStateHolder.call.collect { call ->
+                        val live = call.phase != CallPhase.IDLE
+                        binding.returnToCall.visibility = if (live) View.VISIBLE else View.GONE
+                        if (live) {
+                            binding.returnToCall.text =
+                                getString(R.string.return_to_call, call.peerName ?: call.peerCode ?: "")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun refreshList() {
+        showContacts(CallStateHolder.presence.value, CallStateHolder.signalingOnline.value)
+    }
+
+    private fun showContacts(presence: Map<String, Boolean>, online: Boolean) {
+        val rows = ContactStore.all(this).map { contact ->
+            ContactRow(contact, online && presence[contact.code] == true)
+        }.sortedWith(compareByDescending<ContactRow> { it.online }.thenBy { it.contact.name.lowercase() })
+        adapter.submitList(rows)
+        binding.emptyHint.visibility = if (rows.isEmpty()) View.VISIBLE else View.GONE
+    }
+
+    // ---- sheets --------------------------------------------------------------
+
+    private fun openSettingsSheet() {
+        val sheet = SheetSettingsBinding.inflate(layoutInflater)
+        val dialog = BottomSheetDialog(this)
+        dialog.setContentView(sheet.root)
+        settingsSheet = sheet
+
+        val myCode = DeviceIdentity.myCode(this)
+        Avatars.bind(sheet.avatar, DeviceIdentity.myName(this).ifBlank { getString(R.string.you) }, myCode)
+        sheet.myCode.text = myCode
+        sheet.copyCode.setOnClickListener { copyCode(myCode) }
+
+        sheet.myName.setText(DeviceIdentity.myName(this))
+        sheet.myName.setOnEditorActionListener { view, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                commitName(view.text.toString())
+                view.clearFocus()
+            }
+            false
+        }
+
+        sheet.versionText.text = getString(R.string.version_label, Updater.currentVersion)
+        renderUpdateSection()
+        sheet.updateButton.setOnClickListener {
+            val update = availableUpdate
+            if (update != null) startUpdate(update) else checkForUpdate(quiet = false)
+        }
+
+        dialog.setOnDismissListener {
+            commitName(sheet.myName.text.toString())
+            settingsSheet = null
+        }
+        dialog.show()
+    }
+
+    private fun openAddSheet() {
+        val sheet = SheetAddBinding.inflate(layoutInflater)
+        val dialog = BottomSheetDialog(this)
+        dialog.setContentView(sheet.root)
+        sheet.addConfirm.setOnClickListener {
+            if (addContact(sheet.addCode.text.toString(), sheet.addName.text.toString())) dialog.dismiss()
+        }
+        sheet.addName.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) sheet.addConfirm.performClick()
+            false
+        }
+        dialog.show()
+        sheet.addCode.requestFocus()
+    }
+
+    private fun openContact(contact: Contact) {
+        val sheet = SheetContactBinding.inflate(layoutInflater)
+        val dialog = BottomSheetDialog(this)
+        dialog.setContentView(sheet.root)
+        Avatars.bind(sheet.avatar, contact.name, contact.code)
+        sheet.name.text = contact.name
+        sheet.code.text = contact.code
+        sheet.callButton.setOnClickListener {
+            dialog.dismiss()
+            onCallTapped(contact)
+        }
+        sheet.removeButton.setOnClickListener {
+            dialog.dismiss()
+            confirmRemove(contact)
+        }
+        dialog.show()
+    }
+
+    // ---- updates ---------------------------------------------------------------
+
+    private fun checkForUpdate(quiet: Boolean) {
+        if (updating) return
+        if (!quiet) {
+            settingsSheet?.let { sheet ->
+                sheet.updateStatus.visibility = View.VISIBLE
+                sheet.updateStatus.setText(R.string.checking_updates)
+                sheet.updateButton.isEnabled = false
+            }
+        }
+        lifecycleScope.launch {
+            when (val result = Updater.check()) {
+                is Updater.Check.Available -> availableUpdate = result.release
+                Updater.Check.UpToDate -> {
+                    availableUpdate = null
+                    if (!quiet) settingsSheet?.updateStatus?.setText(R.string.up_to_date)
+                }
+                is Updater.Check.Failed -> {
+                    if (!quiet) {
+                        settingsSheet?.updateStatus?.text = getString(R.string.update_failed, result.reason)
+                    }
+                }
+            }
+            settingsSheet?.updateButton?.isEnabled = true
+            renderUpdateSection()
+        }
+    }
+
+    private fun renderUpdateSection() {
+        val update = availableUpdate
+        binding.updateBanner.visibility = if (update != null && !updating) View.VISIBLE else View.GONE
+        update?.let { binding.updateBanner.text = getString(R.string.update_banner, it.version) }
+
+        val sheet = settingsSheet ?: return
+        if (update != null && !updating) {
+            sheet.updateStatus.visibility = View.VISIBLE
+            sheet.updateStatus.text = getString(R.string.update_available, update.version)
+            sheet.updateButton.setText(R.string.update_now)
+        } else if (!updating) {
+            sheet.updateButton.setText(R.string.check_updates)
+        }
+    }
+
+    private fun startUpdate(release: Updater.Release) {
+        if (updating) return
+        if (!Updater.canInstall(this)) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.allow_installs_title)
+                .setMessage(R.string.allow_installs_message)
+                .setPositiveButton(R.string.open_settings) { _, _ ->
+                    runCatching { startActivity(Updater.installPermissionIntent(this)) }
+                }
+                .setNegativeButton(R.string.not_now, null)
+                .show()
+            return
+        }
+        updating = true
+        renderUpdateSection()
+        showUpdateProgress(0)
+        lifecycleScope.launch {
+            try {
+                val apk = Updater.download(this@MainActivity, release) { percent -> showUpdateProgress(percent) }
+                settingsSheet?.updateStatus?.setText(R.string.installing_update)
+                Toast.makeText(this@MainActivity, R.string.installing_update, Toast.LENGTH_SHORT).show()
+                Updater.install(this@MainActivity, apk)
+            } catch (error: Exception) {
+                val reason = error.message ?: error.javaClass.simpleName
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.update_failed, reason),
+                    Toast.LENGTH_LONG
+                ).show()
+                settingsSheet?.updateStatus?.text = getString(R.string.update_failed, reason)
+            } finally {
+                updating = false
+                settingsSheet?.updateProgress?.visibility = View.GONE
+                settingsSheet?.updateButton?.isEnabled = true
+                renderUpdateSection()
+            }
+        }
+    }
+
+    private fun showUpdateProgress(percent: Int) {
+        val text = getString(R.string.downloading_update, percent)
+        binding.updateBanner.visibility = View.VISIBLE
+        binding.updateBanner.text = text
+        settingsSheet?.let { sheet ->
+            sheet.updateStatus.visibility = View.VISIBLE
+            sheet.updateStatus.text = text
+            sheet.updateProgress.visibility = View.VISIBLE
+            sheet.updateProgress.progress = percent
+            sheet.updateButton.isEnabled = false
+        }
+    }
+
+    // ---- crash report ------------------------------------------------------------
 
     /**
      * There is no crash reporting service behind a sideloaded app, so the last
@@ -117,99 +379,16 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    override fun onPause() {
-        super.onPause()
-        commitName()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        refreshList()
-        CallStateHolder.consumeEndReason()?.let {
-            Toast.makeText(this, it, Toast.LENGTH_LONG).show()
-        }
-        // The directory is otherwise only pushed when somebody joins or leaves,
-        // so a screen opened in between would show nothing.
-        CallService.refreshDirectory(this)
-        // If a call is already live (e.g. we came back from the launcher during
-        // one), jump straight back into it.
-        if (CallStateHolder.call.value.phase != CallPhase.IDLE) {
-            startActivity(CallActivity.ongoingIntent(this))
-        }
-    }
-
-    private fun observeState() {
-        lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(
-                    CallStateHolder.presence,
-                    CallStateHolder.signalingOnline,
-                    CallStateHolder.directory,
-                    CallStateHolder.contactsRevision
-                ) { presence, online, directory, _ ->
-                    Triple(presence, online, directory)
-                }.collect { (presence, online, directory) ->
-                    val saved = ContactStore.codes(this@MainActivity).toSet()
-                    val unsaved = directory.filterNot { it.code in saved }
-                    directoryAdapter.submitList(unsaved)
-                    // Keep the card up even when empty: a section that vanishes
-                    // reads as broken, where "nobody else is online" is an answer.
-                    binding.discoveredCard.visibility = android.view.View.VISIBLE
-                    binding.discovered.visibility =
-                        if (unsaved.isEmpty()) android.view.View.GONE
-                        else android.view.View.VISIBLE
-                    binding.discoveredEmpty.visibility =
-                        if (unsaved.isEmpty()) android.view.View.VISIBLE
-                        else android.view.View.GONE
-                    binding.discoveredEmpty.setText(
-                        if (online) R.string.nobody_online else R.string.status_connecting
-                    )
-
-                    binding.connectionStatus.setText(
-                        if (online) R.string.status_connected else R.string.status_connecting
-                    )
-                    adapter.submitList(
-                        ContactStore.all(this@MainActivity).map { contact ->
-                            ContactRow(contact, online && presence[contact.code] == true)
-                        }
-                    )
-                    binding.emptyHint.visibility =
-                        if (adapter.itemCount == 0) android.view.View.VISIBLE
-                        else android.view.View.GONE
-                }
-            }
-        }
-    }
-
-    private fun refreshList() {
-        val presence = CallStateHolder.presence.value
-        val online = CallStateHolder.signalingOnline.value
-        adapter.submitList(
-            ContactStore.all(this).map { ContactRow(it, online && presence[it.code] == true) }
-        )
-        binding.emptyHint.visibility =
-            if (ContactStore.all(this).isEmpty()) android.view.View.VISIBLE
-            else android.view.View.GONE
-    }
+    // ---- contacts ----------------------------------------------------------------
 
     /**
      * The name is what the other phone shows instead of a code, so it is
      * republished as soon as editing finishes rather than needing a save button.
      */
-    private fun setUpNameField() {
-        binding.myName.setText(DeviceIdentity.myName(this))
-        binding.myName.setOnEditorActionListener { view, _, _ ->
-            commitName()
-            view.clearFocus()
-            true
-        }
-        binding.myName.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) commitName() }
-    }
-
-    private fun commitName() {
-        val typed = binding.myName.text.toString().trim()
-        if (typed.isEmpty() || typed == DeviceIdentity.myName(this)) return
-        DeviceIdentity.setMyName(this, typed)
+    private fun commitName(typed: String) {
+        val name = typed.trim()
+        if (name.isEmpty() || name == DeviceIdentity.myName(this)) return
+        DeviceIdentity.setMyName(this, name)
         CallService.republishName(this)
     }
 
@@ -236,9 +415,10 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, R.string.code_copied, Toast.LENGTH_SHORT).show()
     }
 
-    private fun addContact() {
-        val code = DeviceIdentity.normalize(binding.addCode.text.toString())
-        val name = binding.addName.text.toString().trim().ifEmpty { code }
+    /** Returns true when the contact was saved, so the sheet can close. */
+    private fun addContact(rawCode: String, rawName: String): Boolean {
+        val code = DeviceIdentity.normalize(rawCode)
+        val name = rawName.trim().ifEmpty { code }
 
         when {
             !DeviceIdentity.isValid(code) ->
@@ -251,16 +431,14 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.already_added, Toast.LENGTH_SHORT).show()
 
             else -> {
-                binding.addCode.text?.clear()
-                binding.addName.text?.clear()
-                // Adding them here doesn't add us there — same as saving a phone
-                // number. Both sides add each other once.
                 Toast.makeText(this, getString(R.string.contact_added, name), Toast.LENGTH_SHORT).show()
                 CallService.refreshContacts(this)
                 CallService.askToBeAdded(this, code)
                 refreshList()
+                return true
             }
         }
+        return false
     }
 
     private fun confirmRemove(contact: Contact) {
@@ -276,7 +454,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun onContactTapped(contact: Contact) {
+    private fun onCallTapped(contact: Contact) {
         if (!SetupFlow.hasCallPermissions(this)) {
             pendingCall = contact
             permissionLauncher.launch(SetupFlow.missingPermissions(this))

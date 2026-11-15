@@ -1,0 +1,8 @@
+<!-- Instagram-style story ring around an avatar. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <gradient
+        android:angle="45"
+        android:startColor="#FEDA75"
+        android:centerColor="#D62976"
+        android:endColor="#4F5BD5" />
+</shape>

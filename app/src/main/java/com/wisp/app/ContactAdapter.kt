@@ -1,7 +1,9 @@
 package com.wisp.app
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
@@ -9,9 +11,13 @@ import com.wisp.app.databinding.ItemContactBinding
 
 data class ContactRow(val contact: Contact, val online: Boolean)
 
+/**
+ * Contact rows: tapping the camera calls, tapping the row opens their card.
+ * Calling is never one stray tap on a big target away.
+ */
 class ContactAdapter(
     private val onCall: (Contact) -> Unit,
-    private val onRemove: (Contact) -> Unit
+    private val onOpen: (Contact) -> Unit
 ) : ListAdapter<ContactRow, ContactAdapter.Holder>(Diff) {
 
     object Diff : DiffUtil.ItemCallback<ContactRow>() {
@@ -31,18 +37,16 @@ class ContactAdapter(
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val row = getItem(position)
         val binding = holder.binding
+        val context = binding.root.context
+        Avatars.bind(binding.avatar, row.contact.name, row.contact.code)
         binding.name.text = row.contact.name
-        binding.code.text = row.contact.code
-        binding.presenceDot.setImageResource(
-            if (row.online) R.drawable.dot_online else R.drawable.dot_offline
+        binding.presenceDot.visibility = if (row.online) View.VISIBLE else View.GONE
+        binding.presenceLabel.setText(if (row.online) R.string.active_now else R.string.offline)
+        binding.presenceLabel.setTextColor(
+            ContextCompat.getColor(context, if (row.online) R.color.wisp_online else R.color.wisp_text_dim)
         )
-        binding.presenceLabel.setText(
-            if (row.online) R.string.online else R.string.offline
-        )
-        binding.root.setOnClickListener { onCall(row.contact) }
-        binding.root.setOnLongClickListener {
-            onRemove(row.contact)
-            true
-        }
+        binding.callButton.contentDescription = context.getString(R.string.call_name, row.contact.name)
+        binding.callButton.setOnClickListener { onCall(row.contact) }
+        binding.root.setOnClickListener { onOpen(row.contact) }
     }
 }

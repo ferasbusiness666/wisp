@@ -223,3 +223,11 @@ over a CI-signed one.
 Chat, group calls, real access control beyond code-as-identity, and local
 network/Bluetooth discovery. Calls work over the internet, not just in the same
 room.
+
+## Updating phones
+
+Settings (the profile button on the home screen) → **Check for updates**.
+The app reads this repo's latest GitHub Release, downloads the APK for the
+phone's CPU and installs it over itself, keeping contacts. Android asks once
+to allow installs from Wisp. This only works while the repo is **public**,
+because a private repo's release files need a login to download.

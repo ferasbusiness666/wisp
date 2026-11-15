@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.RingtoneManager
@@ -48,6 +49,25 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
 
     companion object {
         private const val TAG = "WispService"
+
+        private val HEADSET_TYPES = setOf(
+            AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+            26 // AudioDeviceInfo.TYPE_BLE_HEADSET (API 31)
+        )
+
+        /** Most private first: whatever is on your head, then the earpiece. */
+        private val PRIVATE_ROUTE_ORDER = listOf(
+            26, // TYPE_BLE_HEADSET
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+        )
 
         const val ACTION_START = "com.wisp.app.START"
         const val ACTION_CALL = "com.wisp.app.CALL"
@@ -520,6 +540,10 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
         publish { it.copy(mediaVersion = it.mediaVersion + 1) }
     }
 
+    override fun onRemoteMediaState(micOn: Boolean, cameraOn: Boolean) {
+        publish { it.copy(remoteMicOn = micOn, remoteCameraOn = cameraOn) }
+    }
+
     override fun onRenegotiationFailed(reason: String) {
         Log.w(TAG, "renegotiation failed: $reason")
         if (phase == CallPhase.OUTGOING || phase == CallPhase.CONNECTING) {
@@ -656,6 +680,23 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
         engine?.switchCamera { front -> publish { it.copy(frontCamera = front) } }
     }
 
+    fun toggleSpeaker() {
+        applySpeaker(!CallStateHolder.call.value.speakerOn)
+    }
+
+    /** Volume keys step Wisp's own gain, which can go past the system's 100%. */
+    fun nudgeVolume(delta: Int) {
+        setVolumePercent(CallStateHolder.call.value.volumePercent + delta)
+    }
+
+    fun collectStats(onResult: (String) -> Unit) {
+        val call = engine ?: run {
+            onResult("Not in a call")
+            return
+        }
+        call.collectStats(onResult)
+    }
+
     fun setVolumePercent(percent: Int) {
         val clamped = percent.coerceIn(0, 200)
         engine?.setRemoteVolume(clamped / 100.0)
@@ -772,8 +813,9 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
             @Suppress("DEPRECATION")
             previousSpeakerphone = audio.isSpeakerphoneOn
             audio.mode = AudioManager.MODE_IN_COMMUNICATION
-            @Suppress("DEPRECATION")
-            audio.isSpeakerphoneOn = true
+            // Loudspeaker by default, like any video call, unless headphones are
+            // already plugged in or paired: then the call goes to them.
+            applySpeaker(!privateAudioConnected(audio))
         }
         if (wakeLock == null) {
             val power = getSystemService(PowerManager::class.java)
@@ -784,10 +826,41 @@ class CallService : Service(), SignalingClient.Listener, CallEngine.Events {
         }
     }
 
+    private fun privateAudioConnected(audio: AudioManager): Boolean =
+        audio.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type in HEADSET_TYPES }
+
+    /**
+     * Routes call audio to the loudspeaker, or to the most private output there
+     * is: a Bluetooth or wired headset if connected, otherwise the earpiece.
+     */
+    private fun applySpeaker(on: Boolean) {
+        val audio = getSystemService(AudioManager::class.java) ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val devices = audio.availableCommunicationDevices
+            val target = if (on) {
+                devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            } else {
+                PRIVATE_ROUTE_ORDER.firstNotNullOfOrNull { type -> devices.firstOrNull { it.type == type } }
+            }
+            if (target != null) {
+                runCatching { audio.setCommunicationDevice(target) }
+            } else {
+                audio.clearCommunicationDevice()
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            audio.isSpeakerphoneOn = on
+        }
+        publish { it.copy(speakerOn = on) }
+    }
+
     private fun releaseCallResources() {
         wakeLock?.let { lock -> runCatching { if (lock.isHeld) lock.release() } }
         wakeLock = null
         val audio = getSystemService(AudioManager::class.java) ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audio.clearCommunicationDevice()
+        }
         @Suppress("DEPRECATION")
         audio.isSpeakerphoneOn = previousSpeakerphone
         audio.mode = previousAudioMode
